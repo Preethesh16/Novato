@@ -130,26 +130,60 @@ class SetupWizard:
             self.ui.warn("Please choose 1, 2, 3, or s.")
 
     def _setup_offline(self, cfg: _config.Config) -> None:
-        spec = _downloader.select_model()
-        cfg.llamafile_model = spec.name
+        recommended = _downloader.select_model()
+        all_models = list(_downloader.MODELS.values())
+
+        _MODEL_NOTES = {
+            "tinyllama-1.1b": "simple requests, lowest RAM",
+            "phi3-mini":      "good reasoning, best size/quality balance",
+            "mistral-7b":     "strong general knowledge, nuanced queries",
+            "llama3.1-8b":    "best quality, handles anything",
+        }
+
         self.ui.blank()
-        self.ui.info(
-            f"Offline LLM: your RAM suggests [bold]{spec.name}[/] (~{spec.approx_size})."
+        self.ui.console.print("Choose an offline model to download:\n", markup=False)
+        for i, spec in enumerate(all_models, start=1):
+            tag = "  <-- recommended for your RAM" if spec.name == recommended.name else ""
+            line = (
+                f"  [{i}] {spec.name:<18}"
+                f"  {spec.approx_size:<8}"
+                f"  needs {spec.min_ram_gb:.0f} GB RAM"
+                f"  — {_MODEL_NOTES.get(spec.name, '')}"
+                f"{tag}"
+            )
+            self.ui.console.print(line, markup=False)
+        self.ui.console.print(
+            "\n  [s] Skip — download later with 'novato --download-model'\n",
+            markup=False,
         )
 
-        # Already have it? Just point at it.
+        valid = {str(i): spec for i, spec in enumerate(all_models, start=1)}
+        valid["s"] = None  # type: ignore[assignment]
+        while True:
+            choice = (self._safe_input(f"Pick [1-{len(all_models)}/s]: ") or "s").strip().lower()
+            if choice in valid:
+                break
+            self.ui.warn(f"Please choose a number between 1 and {len(all_models)}, or s.")
+
+        if choice == "s":
+            self.ui.warn("Skipped — you can download a model anytime with "
+                         "'novato --download-model'.")
+            return
+
+        spec = valid[choice]
+        cfg.llamafile_model = spec.name
+
+        # Already downloaded? Just point at it.
         if _downloader.is_downloaded(spec):
             cfg.llamafile_path = str(_downloader.model_path(spec))
             self.ui.success(f"Model already downloaded at {cfg.llamafile_path}.")
             return
 
-        # Opt-in: the default (empty answer) is NO so a multi-GB download is
-        # never started just by pressing Enter. The offline tier is optional.
+        # Confirm before starting a potentially large download (default = No).
         answer = (self._safe_input(
-            f"Download it now (~{spec.approx_size})? [y/N]: ") or "n").strip().lower()
+            f"Download {spec.name} (~{spec.approx_size}) now? [y/N]: ") or "n").strip().lower()
         if answer not in ("y", "yes"):
-            self.ui.warn("No problem — skipped the download. Enable it anytime with "
-                         "'novato --download-model'.")
+            self.ui.warn("No problem — skipped. Run 'novato --download-model' anytime.")
             return
 
         path = self._download_fn(spec, self.ui)
@@ -157,8 +191,7 @@ class SetupWizard:
             cfg.llamafile_path = str(path)
             self.ui.success(f"Offline model ready at {path}.")
         else:
-            self.ui.warn("Download didn't finish — you can retry with "
-                         "'novato --download-model'.")
+            self.ui.warn("Download didn't finish — retry with 'novato --download-model'.")
 
     def _setup_online(self, cfg: _config.Config) -> None:
         self.ui.blank()
