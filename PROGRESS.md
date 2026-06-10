@@ -55,9 +55,17 @@
 
 - [ ] (none — all five phases complete)
 
+### Post-completion additions
+- [x] `downloader.py` — automatic llamafile model download: RAM-based selection
+      from a registry of **official Mozilla llamafiles**, resumable (HTTP Range),
+      atomic (`.part` → `os.replace` + `chmod +x`), progress callback. Verified
+      the four real model URLs return HTTP 206 + Content-Range (1.0–5.2 GB).
+- [x] `novato --download-model [MODEL]` CLI command + wired into the setup wizard
+      (with a live rich progress bar). 17 new tests.
+
 ## ⏳ Not Started
 
-- [ ] Future: automatic llamafile model download; `.deb` packaging; demo GIF
+- [ ] Future: `.deb` packaging; demo GIF
 
 ---
 

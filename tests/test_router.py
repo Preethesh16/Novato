@@ -89,13 +89,13 @@ def test_groq_unavailable_without_key():
 # -- llamafile backend ------------------------------------------------------
 
 @pytest.mark.parametrize("ram,expected_model", [
-    (2, "phi3:mini"),
-    (6, "phi3"),
-    (12, "llama3.2"),
-    (32, "llama3.1"),
+    (2, "tinyllama-1.1b"),
+    (6, "phi3-mini"),
+    (12, "mistral-7b"),
+    (32, "llama3.1-8b"),
 ])
 def test_select_model_by_ram(ram, expected_model):
-    assert select_model(ram)[0] == expected_model
+    assert select_model(ram).name == expected_model
 
 
 def test_llamafile_with_injected_runner():

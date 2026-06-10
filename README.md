@@ -59,7 +59,12 @@ uv run novato --help
 ```
 
 First run launches a one-time setup wizard. You can skip it and stay on **Basic
-mode**, which works instantly with zero internet and zero AI.
+mode**, which works instantly with zero internet and zero AI. To enable the
+fully-offline local LLM at any time:
+
+```bash
+novato --download-model     # auto-picks a model for your RAM, then enables offline mode
+```
 
 ---
 

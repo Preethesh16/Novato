@@ -80,15 +80,34 @@ def test_online_blank_key_degrades_to_basic(arch_system, isolated_home):
 
 
 def test_both_mode_sets_model_and_key(arch_system, isolated_home):
-    answers = iter(["3", "gsk_key"])
+    # Answers: choose "both", decline the model download, then paste a Groq key.
+    answers = iter(["3", "n", "gsk_key"])
     w = SetupWizard(
         system=arch_system,
         input_fn=lambda p: next(answers, ""),
         verify_groq=lambda k: True,
         open_browser=lambda u: True,
+        download_fn=lambda spec, ui: None,  # never hit the network
     )
     cfg = w.run()
-    # llamafile binary not provided, but Groq key is -> "both" still valid.
+    # llamafile binary declined, but Groq key is set -> "both" still valid.
     assert cfg.mode == "both"
     assert cfg.groq_api_key == "gsk_key"
     assert cfg.llamafile_model  # a model was selected for the offline tier
+
+
+def test_offline_mode_downloads_model(arch_system, isolated_home, tmp_path):
+    # Choose offline, accept the download; download_fn is stubbed to a fake path.
+    fake = tmp_path / "model.llamafile"
+    fake.write_text("#!/bin/sh\n")
+    answers = iter(["1", "y"])
+    w = SetupWizard(
+        system=arch_system,
+        input_fn=lambda p: next(answers, ""),
+        verify_groq=lambda k: True,
+        open_browser=lambda u: True,
+        download_fn=lambda spec, ui: fake,
+    )
+    cfg = w.run()
+    assert cfg.mode == "offline"
+    assert cfg.llamafile_path == str(fake)

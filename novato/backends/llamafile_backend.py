@@ -27,34 +27,9 @@ from .groq_backend import (
 _TIMEOUT = 30  # seconds — local CPU inference is slower than Groq.
 _MAX_CANDIDATES = 6
 
-
-# RAM (GB) -> (model name, approx download size). Smaller models for low-RAM
-# machines so Novato stays usable on a 4 GB laptop (constraint #C).
-_MODEL_BY_RAM = (
-    (4, ("phi3:mini", "1.5GB")),
-    (8, ("phi3", "2.3GB")),
-    (16, ("llama3.2", "4GB")),
-    (float("inf"), ("llama3.1", "8GB")),
-)
-
-
-def select_model(total_ram_gb: Optional[float] = None) -> tuple[str, str]:
-    """Pick an offline model appropriate for the machine's RAM.
-
-    ``total_ram_gb`` is injectable for tests; otherwise probed via psutil with a
-    conservative fallback when psutil is unavailable.
-    """
-    if total_ram_gb is None:
-        try:
-            import psutil  # type: ignore
-
-            total_ram_gb = psutil.virtual_memory().total / (1024 ** 3)
-        except Exception:
-            total_ram_gb = 4.0  # Assume a modest machine.
-    for threshold, model in _MODEL_BY_RAM:
-        if total_ram_gb < threshold:
-            return model
-    return _MODEL_BY_RAM[-1][1]
+# Model selection + download now live in novato.downloader (the single source of
+# truth for the offline model registry). Re-exported here for convenience.
+from ..downloader import ModelSpec, select_model  # noqa: E402,F401
 
 
 class LlamafileBackend:
