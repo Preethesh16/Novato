@@ -128,6 +128,35 @@ class App:
                                     repo="(offline)", source=self.system.package_manager))
         return out
 
+    def _maybe_sync_first(self) -> None:
+        """On rolling-release distros, offer to refresh before installing.
+
+        Installing a single package against a stale database is the classic
+        Arch "partial upgrade" trap: the version in your local list may already
+        be gone from the mirrors, giving a 404. We explain this in plain words
+        and offer to sync first (default Yes). Never forced — the user can decline.
+        """
+        sync = self.system.sync_cmd
+        if not sync or self.dry_run:
+            return
+        self.ui.blank()
+        if self.system.package_manager == "pacman":
+            self.ui.info(
+                "On Arch-based systems, installing a single package without "
+                "refreshing first can fail (the version in your local list may "
+                "already be gone from the servers — the dreaded 404)."
+            )
+        else:
+            self.ui.info("It's good practice to refresh your package list before installing.")
+        if not self.ui.ask_yes_no(f"Refresh the system first with '{sync}'?", default_no=False):
+            self.ui.info("Okay — skipping the refresh.")
+            return
+        self.ui.blank()
+        self.ui.status_line(self.config.mode, "Refreshing package database...")
+        result = execute(sync)
+        if not result.succeeded:
+            self.ui.warn("Refresh didn't complete cleanly — continuing anyway.")
+
     def _install(self, package: str, *, source: str = "") -> int:
         """Confirm and run the install command for a single package."""
         if source == "aur" and self.system.aur_helper:
@@ -140,6 +169,9 @@ class App:
             self.ui.error(verdict.reason)
             return 2
         command = verdict.sanitized or command
+
+        # On rolling-release distros, offer a refresh to avoid partial upgrades.
+        self._maybe_sync_first()
 
         if self.config.explain:
             self._explain_command(command, package)
@@ -270,9 +302,19 @@ class App:
             return
         if enabled:
             changed, msg = _watcher.install_hook(shell)
+            (self.ui.info if changed else self.ui.warn)(msg)
+            # Spoon-feed activation: a child process can't reload the parent
+            # shell, so tell the user in the simplest possible terms.
+            self.ui.blank()
+            self.ui.success("One last step to switch it on:")
+            self.ui.info("  👉 Just close this terminal and open a new one.")
+            self.ui.info(f"     (or, if you prefer, run:  source ~/.{shell}rc )")
+            self.ui.blank()
+            self.ui.info("After that, Novato silently watches for failed commands "
+                         "and offers a fix whenever one breaks.")
         else:
             changed, msg = _watcher.uninstall_hook(shell)
-        (self.ui.info if changed else self.ui.warn)(msg)
+            (self.ui.info if changed else self.ui.warn)(msg)
 
     def download_model(self, name: str = "auto") -> int:
         """Download an offline llamafile model and enable offline mode."""

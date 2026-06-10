@@ -24,29 +24,34 @@ from typing import Optional
 # ``install`` and ``search`` are never run with auto-confirm flags; the safety
 # layer guarantees a human always confirms before execution.
 # ---------------------------------------------------------------------------
+#
+# ``sync`` refreshes the package database before an install. On Arch (rolling
+# release) this is ``-Syu`` — a *full* upgrade — because installing a single
+# package against a stale db triggers the classic "partial upgrade" 404. On
+# apt it's ``apt update``. dnf/zypper auto-refresh metadata, so sync is empty.
 DISTRO_PM_MAP: dict[str, dict] = {
-    "arch":        {"pm": "pacman", "install": "sudo pacman -S",      "search": "pacman -Ss",       "aur": True},
-    "manjaro":     {"pm": "pacman", "install": "sudo pacman -S",      "search": "pacman -Ss",       "aur": True},
-    "endeavouros": {"pm": "pacman", "install": "sudo pacman -S",      "search": "pacman -Ss",       "aur": True},
-    "garuda":      {"pm": "pacman", "install": "sudo pacman -S",      "search": "pacman -Ss",       "aur": True},
-    "artix":       {"pm": "pacman", "install": "sudo pacman -S",      "search": "pacman -Ss",       "aur": True},
-    "ubuntu":      {"pm": "apt",    "install": "sudo apt install",    "search": "apt-cache search", "aur": False},
-    "debian":      {"pm": "apt",    "install": "sudo apt install",    "search": "apt-cache search", "aur": False},
-    "linuxmint":   {"pm": "apt",    "install": "sudo apt install",    "search": "apt-cache search", "aur": False},
-    "pop":         {"pm": "apt",    "install": "sudo apt install",    "search": "apt-cache search", "aur": False},
-    "elementary":  {"pm": "apt",    "install": "sudo apt install",    "search": "apt-cache search", "aur": False},
-    "zorin":       {"pm": "apt",    "install": "sudo apt install",    "search": "apt-cache search", "aur": False},
-    "kali":        {"pm": "apt",    "install": "sudo apt install",    "search": "apt-cache search", "aur": False},
-    "raspbian":    {"pm": "apt",    "install": "sudo apt install",    "search": "apt-cache search", "aur": False},
-    "fedora":      {"pm": "dnf",    "install": "sudo dnf install",    "search": "dnf search",       "aur": False},
-    "rhel":        {"pm": "dnf",    "install": "sudo dnf install",    "search": "dnf search",       "aur": False},
-    "centos":      {"pm": "dnf",    "install": "sudo dnf install",    "search": "dnf search",       "aur": False},
-    "rocky":       {"pm": "dnf",    "install": "sudo dnf install",    "search": "dnf search",       "aur": False},
-    "almalinux":   {"pm": "dnf",    "install": "sudo dnf install",    "search": "dnf search",       "aur": False},
-    "opensuse":    {"pm": "zypper", "install": "sudo zypper install", "search": "zypper search",    "aur": False},
-    "opensuse-leap":      {"pm": "zypper", "install": "sudo zypper install", "search": "zypper search", "aur": False},
-    "opensuse-tumbleweed":{"pm": "zypper", "install": "sudo zypper install", "search": "zypper search", "aur": False},
-    "sles":        {"pm": "zypper", "install": "sudo zypper install", "search": "zypper search",    "aur": False},
+    "arch":        {"pm": "pacman", "install": "sudo pacman -S",      "search": "pacman -Ss",       "sync": "sudo pacman -Syu",  "aur": True},
+    "manjaro":     {"pm": "pacman", "install": "sudo pacman -S",      "search": "pacman -Ss",       "sync": "sudo pacman -Syu",  "aur": True},
+    "endeavouros": {"pm": "pacman", "install": "sudo pacman -S",      "search": "pacman -Ss",       "sync": "sudo pacman -Syu",  "aur": True},
+    "garuda":      {"pm": "pacman", "install": "sudo pacman -S",      "search": "pacman -Ss",       "sync": "sudo pacman -Syu",  "aur": True},
+    "artix":       {"pm": "pacman", "install": "sudo pacman -S",      "search": "pacman -Ss",       "sync": "sudo pacman -Syu",  "aur": True},
+    "ubuntu":      {"pm": "apt",    "install": "sudo apt install",    "search": "apt-cache search", "sync": "sudo apt update",   "aur": False},
+    "debian":      {"pm": "apt",    "install": "sudo apt install",    "search": "apt-cache search", "sync": "sudo apt update",   "aur": False},
+    "linuxmint":   {"pm": "apt",    "install": "sudo apt install",    "search": "apt-cache search", "sync": "sudo apt update",   "aur": False},
+    "pop":         {"pm": "apt",    "install": "sudo apt install",    "search": "apt-cache search", "sync": "sudo apt update",   "aur": False},
+    "elementary":  {"pm": "apt",    "install": "sudo apt install",    "search": "apt-cache search", "sync": "sudo apt update",   "aur": False},
+    "zorin":       {"pm": "apt",    "install": "sudo apt install",    "search": "apt-cache search", "sync": "sudo apt update",   "aur": False},
+    "kali":        {"pm": "apt",    "install": "sudo apt install",    "search": "apt-cache search", "sync": "sudo apt update",   "aur": False},
+    "raspbian":    {"pm": "apt",    "install": "sudo apt install",    "search": "apt-cache search", "sync": "sudo apt update",   "aur": False},
+    "fedora":      {"pm": "dnf",    "install": "sudo dnf install",    "search": "dnf search",       "sync": "",                  "aur": False},
+    "rhel":        {"pm": "dnf",    "install": "sudo dnf install",    "search": "dnf search",       "sync": "",                  "aur": False},
+    "centos":      {"pm": "dnf",    "install": "sudo dnf install",    "search": "dnf search",       "sync": "",                  "aur": False},
+    "rocky":       {"pm": "dnf",    "install": "sudo dnf install",    "search": "dnf search",       "sync": "",                  "aur": False},
+    "almalinux":   {"pm": "dnf",    "install": "sudo dnf install",    "search": "dnf search",       "sync": "",                  "aur": False},
+    "opensuse":    {"pm": "zypper", "install": "sudo zypper install", "search": "zypper search",    "sync": "",                  "aur": False},
+    "opensuse-leap":      {"pm": "zypper", "install": "sudo zypper install", "search": "zypper search", "sync": "", "aur": False},
+    "opensuse-tumbleweed":{"pm": "zypper", "install": "sudo zypper install", "search": "zypper search", "sync": "", "aur": False},
+    "sles":        {"pm": "zypper", "install": "sudo zypper install", "search": "zypper search",    "sync": "",                  "aur": False},
 }
 
 # Order matters: when a distro is unknown we fall back through its ID_LIKE
@@ -80,6 +85,7 @@ class SystemInfo:
     supports_aur: bool
     aur_helper: Optional[str]
     shell: str
+    sync_cmd: str = ""
     supported: bool = True
     extra: dict = field(default_factory=dict)
 
@@ -92,6 +98,7 @@ class SystemInfo:
             "package_manager": self.package_manager,
             "install_cmd": self.install_cmd,
             "search_cmd": self.search_cmd,
+            "sync_cmd": self.sync_cmd,
             "supports_aur": self.supports_aur,
             "aur_helper": self.aur_helper,
             "shell": self.shell,
@@ -220,6 +227,7 @@ def detect_system(os_release_path: str = "/etc/os-release") -> SystemInfo:
         package_manager=entry["pm"],
         install_cmd=entry["install"],
         search_cmd=entry["search"],
+        sync_cmd=entry.get("sync", ""),
         supports_aur=supports_aur,
         aur_helper=aur_helper,
         shell=shell,
