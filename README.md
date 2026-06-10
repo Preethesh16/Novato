@@ -117,13 +117,42 @@ Unknown derivatives are auto-detected via `ID_LIKE`, so most remixes work too.
 | Mode | Engine | Speed | Privacy | Needs |
 |---|---|---|---|---|
 | **Basic** ⚡ | Rules + fuzzy match | instant | 100% local | nothing (always works) |
-| **Offline** 🔒 | llamafile (local LLM) | 3–8 s | 100% local | ~1.5 GB one-time download |
+| **Offline** 🔒 | llamafile (local LLM) | 3–8 s | 100% local | one-time model download |
 | **Online** ⚡ | Groq free API | ~200 ms | query only* | free email signup |
 | **Both** ⭐ | Groq + llamafile fallback | best | best effort | both of the above |
 
 \* Novato never sends your actual commands, file paths, usernames, or system
 info to any online service — only the intent you type. See the
 [privacy policy](DOCUMENTATION.md#privacy).
+
+### Do I need the offline model if I have internet?
+
+**No.** If you have internet + a Groq key, the online tier handles everything
+and is faster. The offline model is only useful when:
+
+- you're offline (plane, no Wi-Fi, metered connection),
+- Groq is down, or
+- you want everything to stay on your machine for privacy.
+
+The router handles this automatically in `both` mode — Groq runs first; the
+local model only kicks in when Groq is unreachable. You never think about it.
+
+### Offline model tiers (which model should I pick?)
+
+The offline LLM comes in four sizes. Bigger = smarter answers, but needs more
+RAM and is a larger one-time download.
+
+| RAM | Auto-selected model | Download size | Good at |
+|---|---|---|---|
+| under 4 GB | TinyLlama 1.1B | ~600 MB | Simple, common requests |
+| 4–8 GB | Phi-3-mini 3.8B | ~2.4 GB | Good reasoning, understands context |
+| 8–16 GB | Mistral-7B | ~4.1 GB | Strong general knowledge, nuanced queries |
+| 16 GB+ | Llama-3.1-8B | ~4.7 GB | Best quality, handles vague/complex requests |
+
+`novato --download-model` auto-picks based on your available RAM. The smarter
+the model, the better it handles unusual or creative descriptions — e.g.
+"something lightweight to read PDFs without all the bloat" vs. just "pdf viewer".
+For most users, **Phi-3-mini** (4–8 GB RAM) is the sweet spot.
 
 ---
 
