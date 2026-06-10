@@ -6,7 +6,6 @@ import pytest
 
 from novato import config as cfgmod
 from novato.detector import SystemInfo
-from novato.presenter import Presenter
 from novato.setup_wizard import SetupWizard
 
 
@@ -26,31 +25,41 @@ def isolated_home(tmp_path, monkeypatch):
     yield tmp_path
 
 
-def _wizard(arch_system, answers, *, verify=lambda k: True):
-    it = iter(answers)
-    presenter = Presenter(input_fn=lambda prompt: next(it, ""))
-    return SetupWizard(
-        system=arch_system,
-        presenter=presenter,
-        input_fn=lambda prompt: next(it, ""),
-        verify_groq=verify,
-        open_browser=lambda url: True,
-    )
+# A no-op hook installer so tests never touch the real ~/.zshrc. Returns the
+# (changed, message) shape the wizard expects.
+_STUB_HOOK = lambda shell: (True, "stub-installed")  # noqa: E731
 
 
 def test_skip_stays_basic(arch_system, isolated_home):
-    # _wizard shares one iterator via presenter; build explicitly here.
+    # Skip AI, then accept the mistake-watcher (blank answer -> default yes).
     answers = iter(["s"])
     w = SetupWizard(
         system=arch_system,
         input_fn=lambda p: next(answers, ""),
         verify_groq=lambda k: True,
         open_browser=lambda u: True,
+        install_hook_fn=_STUB_HOOK,
     )
     cfg = w.run()
     assert cfg.mode == "basic"
     assert cfg.setup_complete is True
+    assert cfg.mistake is True  # watcher enabled during onboarding
     assert cfgmod.load_config().mode == "basic"
+
+
+def test_skip_declining_watcher(arch_system, isolated_home):
+    # Skip AI and decline the mistake-watcher -> mistake stays off.
+    answers = iter(["s", "n"])
+    w = SetupWizard(
+        system=arch_system,
+        input_fn=lambda p: next(answers, ""),
+        verify_groq=lambda k: True,
+        open_browser=lambda u: True,
+        install_hook_fn=_STUB_HOOK,
+    )
+    cfg = w.run()
+    assert cfg.mode == "basic"
+    assert cfg.mistake is False
 
 
 def test_online_with_valid_key(arch_system, isolated_home):
@@ -60,6 +69,7 @@ def test_online_with_valid_key(arch_system, isolated_home):
         input_fn=lambda p: next(answers, ""),
         verify_groq=lambda k: True,
         open_browser=lambda u: True,
+        install_hook_fn=_STUB_HOOK,
     )
     cfg = w.run()
     assert cfg.mode == "online"
@@ -73,6 +83,7 @@ def test_online_blank_key_degrades_to_basic(arch_system, isolated_home):
         input_fn=lambda p: next(answers, ""),
         verify_groq=lambda k: True,
         open_browser=lambda u: True,
+        install_hook_fn=_STUB_HOOK,
     )
     cfg = w.run()
     assert cfg.mode == "basic"  # no usable tier -> basic
@@ -89,6 +100,7 @@ def test_both_declining_download_degrades_to_online(arch_system, isolated_home):
         verify_groq=lambda k: True,
         open_browser=lambda u: True,
         download_fn=lambda spec, ui: None,  # never hit the network
+        install_hook_fn=_STUB_HOOK,
     )
     cfg = w.run()
     assert cfg.mode == "online"  # offline tier not configured -> online only
@@ -107,6 +119,7 @@ def test_both_with_model_and_key_stays_both(arch_system, isolated_home, tmp_path
         verify_groq=lambda k: True,
         open_browser=lambda u: True,
         download_fn=lambda spec, ui: fake,
+        install_hook_fn=_STUB_HOOK,
     )
     cfg = w.run()
     assert cfg.mode == "both"
@@ -123,6 +136,7 @@ def test_offline_declining_download_stays_basic(arch_system, isolated_home):
         verify_groq=lambda k: True,
         open_browser=lambda u: True,
         download_fn=lambda spec, ui: None,
+        install_hook_fn=_STUB_HOOK,
     )
     cfg = w.run()
     assert cfg.mode == "basic"  # optional download declined -> safe default
@@ -139,6 +153,7 @@ def test_offline_mode_downloads_model(arch_system, isolated_home, tmp_path):
         verify_groq=lambda k: True,
         open_browser=lambda u: True,
         download_fn=lambda spec, ui: fake,
+        install_hook_fn=_STUB_HOOK,
     )
     cfg = w.run()
     assert cfg.mode == "offline"

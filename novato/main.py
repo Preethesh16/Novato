@@ -17,6 +17,7 @@ and ``/slash`` tokens, which don't map cleanly onto subcommands.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from typing import Optional, Sequence
 
@@ -303,8 +304,12 @@ class App:
         if enabled:
             changed, msg = _watcher.install_hook(shell)
             (self.ui.info if changed else self.ui.warn)(msg)
-            # Spoon-feed activation: a child process can't reload the parent
-            # shell, so tell the user in the simplest possible terms.
+            # If the hook is already live in *this* shell, nothing more to do.
+            if os.environ.get("NOVATO_MISTAKE_ACTIVE") == "1":
+                self.ui.success("It's already active in this terminal — you're set.")
+                return
+            # A child process can't reload the parent shell, so spoon-feed the
+            # one remaining step in the simplest possible terms.
             self.ui.blank()
             self.ui.success("One last step to switch it on:")
             self.ui.info("  👉 Just close this terminal and open a new one.")

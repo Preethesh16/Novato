@@ -18,6 +18,7 @@ from typing import Callable, Optional
 
 from . import config as _config
 from . import downloader as _downloader
+from . import watcher as _watcher
 from .backends.groq_backend import GroqBackend
 from .detector import SystemInfo, detect_system
 from .presenter import Presenter
@@ -37,6 +38,7 @@ class SetupWizard:
         verify_groq: Optional[Callable[[str], bool]] = None,
         open_browser: Callable[[str], bool] = webbrowser.open,
         download_fn: Optional[Callable] = None,
+        install_hook_fn: Optional[Callable] = None,
     ) -> None:
         self.system = system or detect_system()
         self.ui = presenter or Presenter(input_fn=input_fn)
@@ -46,6 +48,8 @@ class SetupWizard:
         # Injectable so tests never hit the network; defaults to the real
         # progress-bar download.
         self._download_fn = download_fn or download_model_with_progress
+        # Injectable so tests never touch the real ~/.zshrc.
+        self._install_hook = install_hook_fn or _watcher.install_hook
 
     # -- Public entry -------------------------------------------------------
 
@@ -57,6 +61,7 @@ class SetupWizard:
         choice = self._ask_mode()
         if choice == "s":
             cfg.mode = "basic"
+            self._setup_mistake_watcher(cfg)
             cfg.setup_complete = True
             _config.save_config(cfg)
             self._finish(cfg)
@@ -82,6 +87,8 @@ class SetupWizard:
                 cfg.mode = "offline"
             elif not cfg.has_groq and not cfg.has_llamafile:
                 cfg.mode = "basic"
+        self._setup_mistake_watcher(cfg)
+
         cfg.setup_complete = True
         _config.save_config(cfg)
 
@@ -212,6 +219,30 @@ class SetupWizard:
         else:
             self.ui.warn("Couldn't verify that key. Saving it anyway; check it with /status.")
             cfg.groq_api_key = key
+
+    def _setup_mistake_watcher(self, cfg: _config.Config) -> None:
+        """Offer to enable the silent error watcher during onboarding.
+
+        This is the *right* time to set it up: the hook is written to the rc
+        file now, so every new terminal the user opens already has it — they
+        never have to run ``/mistake on`` or reload their shell themselves.
+        """
+        if not _watcher.supported_shell(self.system.shell):
+            return
+        self.ui.blank()
+        self.ui.console.print(
+            "Novato can quietly watch for failed commands and offer a fix when "
+            "one breaks — completely silent while things work.",
+            markup=False,
+        )
+        if not self.ui.ask_yes_no("Enable this mistake-watcher? (recommended)",
+                                  default_no=False):
+            cfg.mistake = False
+            return
+        changed, _msg = self._install_hook(self.system.shell)
+        cfg.mistake = True
+        self.ui.success("Mistake-watcher enabled — it activates automatically in "
+                        "every new terminal you open.")
 
     def _finish(self, cfg: _config.Config) -> None:
         self.ui.blank()

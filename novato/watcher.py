@@ -27,9 +27,12 @@ BEGIN_MARKER = "# >>> novato mistake hook >>>"
 END_MARKER = "# <<< novato mistake hook <<<"
 
 # zsh: precmd runs before each prompt; $? there is the last command's status.
+# The exported marker lets Novato detect whether *this* shell already loaded the
+# hook, so it only nags about activation when the hook genuinely isn't live.
 _ZSH_HOOK = f"""{BEGIN_MARKER}
 # Catches failed commands and asks Novato to explain them. Remove with:
 #   novato /mistake off
+export NOVATO_MISTAKE_ACTIVE=1
 novato_mistake_handler() {{
     local exit_code=$?
     if [ $exit_code -ne 0 ]; then
@@ -46,6 +49,7 @@ precmd_functions+=(novato_mistake_handler)
 _BASH_HOOK = f"""{BEGIN_MARKER}
 # Catches failed commands and asks Novato to explain them. Remove with:
 #   novato /mistake off
+export NOVATO_MISTAKE_ACTIVE=1
 novato_mistake_handler() {{
     local exit_code=$?
     if [ $exit_code -ne 0 ]; then

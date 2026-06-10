@@ -174,6 +174,7 @@ See [DOCUMENTATION.md](DOCUMENTATION.md) for the full architecture and rules.
 
 - **[USERMANUAL.md](USERMANUAL.md)** — step-by-step guide to every feature.
 - **[DOCUMENTATION.md](DOCUMENTATION.md)** — architecture and technical reference.
+- **[CHANGELOG.md](CHANGELOG.md)** — every fix and change, with the reasoning behind it.
 
 ## Contributing
 
