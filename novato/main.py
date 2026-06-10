@@ -361,6 +361,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     app = App(dry_run=args.dry_run)
 
+    # First-run: setup_complete is False until the wizard finishes.
+    if not app.config.setup_complete and not args.analyze_error and not args.download_model:
+        app._cmd_setup()
+        # Rebuild the app so the new config (mode, keys) is active.
+        app = App(dry_run=args.dry_run)
+
     if args.download_model:
         return app.download_model(args.download_model)
 

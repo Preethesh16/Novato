@@ -59,7 +59,7 @@ class SetupWizard:
             cfg.mode = "basic"
             cfg.setup_complete = True
             _config.save_config(cfg)
-            self.ui.success("Staying on Basic mode — you're all set.")
+            self._finish(cfg)
             return cfg
 
         if choice in ("1", "3"):  # offline or both
@@ -182,13 +182,41 @@ class SetupWizard:
 
     def _finish(self, cfg: _config.Config) -> None:
         self.ui.blank()
-        self.ui.success("Novato is set up! 🎉")
-        self.ui.status_line(cfg.mode, "active mode")
-        self.ui.info("\nTry it:")
-        self.ui.info('  novato "i want to edit photos"')
-        self.ui.info("  /explain on")
-        self.ui.info("  /mistake on")
-        self.ui.info("  /help")
+        self.ui.success("Novato is ready! Here is what you can do:\n")
+        lines = [
+            "  INSTALL SOFTWARE BY DESCRIBING IT",
+            '    novato "i want to edit videos"',
+            '    novato "i need something to browse the web"',
+            '    novato "i want to listen to music"',
+            "",
+            "  TEACHING MODE  —  learn what every command does as Novato runs it",
+            "    /explain on      turn on step-by-step explanations",
+            "    /explain off     turn off",
+            "",
+            "  SILENT ERROR WATCHER  —  Novato watches your shell and quietly fixes mistakes",
+            "    /mistake on      enable (adds a hook to your shell)",
+            "    /mistake off     disable",
+            "",
+            "  SWITCH AI MODE  —  change how smart Novato is",
+            "    /switch          show available modes (basic / offline / online / both)",
+            "    /switch online   use Groq (fast, free, needs internet)",
+            "    /switch offline  use local LLM (private, no internet needed)",
+            "    /switch both     Groq first, local LLM as fallback  ⭐",
+            "",
+            "  DOWNLOAD OFFLINE MODEL  —  one-time download for offline AI",
+            "    novato --download-model",
+            "",
+            "  OTHER COMMANDS",
+            "    /status          show current mode, distro, shell",
+            "    /setup           re-run this setup wizard",
+            "    /help            quick reference",
+            "",
+            f"  Active mode right now: {cfg.mode}",
+            "",
+        ]
+        for line in lines:
+            self.ui.console.print(line, markup=False)
+        self.ui.info("[dim]Tip: run /explain on before your first install to see what each command means.[/]")
 
     # -- helpers ------------------------------------------------------------
 
