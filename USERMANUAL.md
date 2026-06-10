@@ -35,6 +35,14 @@ expected output. If you just want the 60-second version, read
 
 ## 1. Installing Novato
 
+> ⚠️ **Note on the public install methods.** Options A, B, and D below require the
+> GitHub repository to be **public**. A private repo returns `404` to anyone who
+> isn't the owner, so the `curl` one-liner, the `pipx git+https://…` install, and
+> the release tarball won't work until the repo is made public. The `yay -S
+> novato` (AUR) method additionally requires the package to be **published to the
+> AUR**. If you are the repository owner and just want to run Novato on your own
+> machine, use **Option C (from source)** — it works regardless of visibility.
+
 Pick **one** of these methods.
 
 ### Option A — One-line installer (easiest)
