@@ -1,8 +1,8 @@
 # Novato Build Progress
 
-## Status: IN PROGRESS
+## Status: COMPLETE
 ## Last Updated: 2026-06-10
-## Current Prompt: 3 (Phase 3 — AI Backends)
+## Current Prompt: 4 (Phases 4 & 5 — Slash Commands, Packaging)
 
 ---
 
@@ -39,17 +39,25 @@
 - [x] Wired router into `main.py` (intent + error analysis go through the chain); added `/setup` command
 - [x] Fixed `/help` markup so `[online|offline|both|basic]` renders literally
 
+### Phase 4 — Slash Commands ✅
+- [x] `teacher.py` — `/explain` engine: command → token glossary (PM meanings + flag glossary), beginner-safe
+- [x] `switcher.py` — `/switch` engine: validated mode changes, descriptions, recommended default, menu
+- [x] `watcher.py` — `/mistake` engine: **real zsh + bash shell hooks**, idempotent install/remove with marker guards, preserves existing rc config
+- [x] Wired into `main.py`: `/mistake on|off` installs/removes the hook; `/explain` uses Teacher; `/switch` shows a menu
+
+### Phase 5 — Polish + Packaging ✅
+- [x] Status badges on every status line (`[Novato • <Mode> <emoji>]`)
+- [x] `PKGBUILD` for the AUR (python-hatchling build, runs the test suite in check())
+- [x] `scripts/install.sh` (pipx/uv/pip, no sudo) + `scripts/uninstall.sh` (removes hook + offers config cleanup)
+- [x] Full README with examples, modes, safety, supported distros
+
 ## 🔄 In Progress
 
-- [ ] (none — Phase 3 complete)
+- [ ] (none — all five phases complete)
 
 ## ⏳ Not Started
 
-### Phase 4 — Slash Commands
-- [ ] `watcher.py`, `teacher.py`, `switcher.py` + zsh/bash hooks
-
-### Phase 5 — Polish + Packaging
-- [ ] Status indicators everywhere, full pytest coverage, PKGBUILD, `install.sh`, demo
+- [ ] Future: automatic llamafile model download; `.deb` packaging; demo GIF
 
 ---
 
@@ -101,3 +109,18 @@ suite runs fully offline.
 commands, paths, usernames, or distro details; returned package names are
 validated against real local repos by the searcher.
 **Tests passing:** 112/112. **Lint:** clean.
+
+### Prompt 4 — 2026-06-10 — Phases 4 & 5: Slash Commands + Packaging (PROJECT COMPLETE)
+**What was built:** The slash-command engines as dedicated modules and the real
+shell integration that makes `/mistake` automatic. `watcher.py` installs an
+idempotent, marker-guarded hook into `~/.zshrc` or `~/.bashrc` that pipes failed
+commands to `novato --analyze-error` while staying invisible on success; it
+removes cleanly and preserves the rest of the user's config. `teacher.py` powers
+`/explain` with a PM + flag glossary; `switcher.py` powers `/switch` with a
+validated menu. Packaging landed too: a `PKGBUILD` for the AUR and
+`install.sh`/`uninstall.sh` (pipx/uv/pip, never sudo).
+**Files created:** `novato/{watcher,teacher,switcher}.py`,
+`tests/test_phase4.py`, `PKGBUILD`, `scripts/{install,uninstall}.sh`.
+**Verified live on Arch:** `/switch` menu, `/mistake on` writes the hook,
+`/mistake off` removes it leaving existing rc config intact.
+**Tests passing:** 123/123. **Lint:** clean. **Build:** wheel + sdist OK.
