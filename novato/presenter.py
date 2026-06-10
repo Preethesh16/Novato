@@ -78,19 +78,24 @@ class Presenter:
         self.console.print()
         self.console.print(f"Found {len(ranked)} option(s){where}:\n")
         width = max((len(rr.result.name) for rr in ranked), default=0)
+        # Reserve space: index (6) + name (width) + separator (4) + repo (10) + padding (4)
+        term_w = self.console.width or 100
+        desc_max = max(20, term_w - width - 24)
         for i, rr in enumerate(ranked, start=1):
             r = rr.result
             desc = r.description or (describe(r.name) if describe else "") or ""
+            if len(desc) > desc_max:
+                desc = desc[:desc_max - 1] + "…"
             repo = f"({r.repo})" if r.repo else ""
             name = f"{r.name:<{width}}"
-            line = Text()
+            line = Text(no_wrap=True, overflow="ellipsis")
             line.append(f"  [{i}] ", style="bold cyan")
             line.append(name, style="bold")
             if desc:
                 line.append(f"  — {desc}")
             if repo:
                 line.append(f"  {repo}", style="dim")
-            self.console.print(line)
+            self.console.print(line, no_wrap=True)
         self.console.print()
 
     def _ask(self, prompt: str) -> Optional[str]:
@@ -129,6 +134,17 @@ class Presenter:
         answer = self._ask(f"Confirm? {suffix}: ")
         if answer is None:
             return False  # No input available -> safest choice is "no".
+        raw = answer.strip().lower()
+        if not raw:
+            return not default_no
+        return raw in ("y", "yes")
+
+    def ask_yes_no(self, question: str, *, default_no: bool = True) -> bool:
+        """Ask a free-form yes/no question. ``default_no`` sets the Enter default."""
+        suffix = "[y/N]" if default_no else "[Y/n]"
+        answer = self._ask(f"{question} {suffix}: ")
+        if answer is None:
+            return not default_no  # No TTY -> take the stated default.
         raw = answer.strip().lower()
         if not raw:
             return not default_no
