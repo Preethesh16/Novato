@@ -391,6 +391,45 @@ It walks you through:
 The offline tier runs a local model via a Mozilla **llamafile** — a single
 self-contained file with no background service. **Nothing leaves your machine.**
 
+### Do I need this if I have internet?
+
+**No.** If you have internet + a Groq key, use `online` or `both` mode — Groq
+is faster, smarter, and free. You do **not** need to download any model.
+
+The offline LLM is only for these situations:
+
+- You're offline (plane, no Wi-Fi, metered data)
+- Groq is temporarily unavailable
+- You want everything 100% local, no queries sent anywhere
+
+In `both` mode, Novato tries Groq first and only falls back to the local model
+if the internet is unreachable — you never have to think about it manually.
+
+---
+
+### Which model should I pick?
+
+The offline LLM comes in four sizes. **Bigger = smarter**, but needs more RAM
+and is a larger one-time download. Here's what that means in practice:
+
+| Your RAM | Model | Download | What it handles well |
+|---|---|---|---|
+| under 4 GB | TinyLlama 1.1B | ~600 MB | Simple, common requests ("video editor", "music player") |
+| 4–8 GB | Phi-3-mini 3.8B | ~2.4 GB | Context + reasoning ("something lightweight to view PDFs") |
+| 8–16 GB | Mistral-7B | ~4.1 GB | Nuanced requests, vague descriptions, edge cases |
+| 16 GB+ | Llama-3.1-8B | ~4.7 GB | Best quality — handles anything you throw at it |
+
+**The difference:** a smaller model knows what "video editor" means but may
+struggle with "something to trim clips for youtube shorts without a watermark".
+A bigger model understands the intent behind those creative descriptions.
+
+**Recommendation:** If you have 4–8 GB RAM, Phi-3-mini is the sweet spot —
+good reasoning, reasonable download size. If you only have 2–4 GB RAM,
+TinyLlama still works for everyday requests (and Basic mode covers most of
+those anyway, for free and instantly).
+
+---
+
 ### Downloading a model
 
 Auto-pick the right size for your RAM and enable offline mode:
@@ -399,27 +438,20 @@ Auto-pick the right size for your RAM and enable offline mode:
 novato --download-model
 ```
 
-Or pick a specific model:
+Or pick a specific model by name:
 
 ```bash
+novato --download-model tinyllama-1.1b
 novato --download-model phi3-mini
+novato --download-model mistral-7b
+novato --download-model llama3.1-8b
 ```
 
-Available models (auto-selected by RAM):
-
-| Your RAM | Model name | Size |
-|---|---|---|
-| under 4 GB | `tinyllama-1.1b` | ~1.0 GB |
-| 4–8 GB | `phi3-mini` | ~2.4 GB |
-| 8–16 GB | `mistral-7b` | ~4.7 GB |
-| 16 GB+ | `llama3.1-8b` | ~5.2 GB |
-
 You'll see a live progress bar. The download is **resumable** — if it's
-interrupted, running the command again continues where it left off (it never
-re-downloads from scratch).
+interrupted, running the command again picks up where it left off.
 
-When it finishes, Novato points your config at the model and switches you to
-`offline` mode (or `both` if you also have a Groq key).
+When it finishes, Novato saves the model path to your config and switches you
+to `offline` mode (or `both` if you also have a Groq key).
 
 ### Already have a llamafile?
 
