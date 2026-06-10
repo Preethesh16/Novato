@@ -141,6 +141,11 @@ See [DOCUMENTATION.md](DOCUMENTATION.md) for the full architecture and rules.
 
 ---
 
+## Full documentation
+
+- **[USERMANUAL.md](USERMANUAL.md)** — step-by-step guide to every feature.
+- **[DOCUMENTATION.md](DOCUMENTATION.md)** — architecture and technical reference.
+
 ## Contributing
 
 Contributions are very welcome — especially new intents, error rules, and distro
