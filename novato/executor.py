@@ -79,9 +79,8 @@ def execute(
     # Log BEFORE executing so a crash still leaves an audit trail.
     _logger.log_event(event, run_cmd, note=note)
 
-    sink = on_line if on_line is not None else _print_line
     try:
-        exit_code = _stream(run_cmd, sink)
+        exit_code = _stream(run_cmd, on_line or _print_line)
     except FileNotFoundError as exc:
         return ExecResult(run_cmd, 127, executed=True, reason=str(exc))
     except OSError as exc:
@@ -94,22 +93,13 @@ def _print_line(line: str) -> None:
 
 
 def _stream(command: str, sink: Callable[[str], None]) -> int:
-    """Run ``command`` and feed each combined stdout/stderr line to ``sink``.
+    """Run ``command`` with the terminal's own stdin/stdout/stderr inherited.
 
-    Uses the user's shell semantics minimally: we tokenise with ``shlex`` and run
-    without ``shell=True`` so there is no extra shell-injection surface. Commands
-    that genuinely need a shell pipeline are out of scope for installs.
+    Inheriting the TTY lets interactive programs (pacman, apt, dnf) display
+    their own prompts and read user input directly — no hidden [Y/n] prompts.
+    The ``sink`` callback is kept for API compatibility but output goes
+    straight to the terminal rather than through the callback.
     """
     tokens = shlex.split(command)
-    proc = subprocess.Popen(
-        tokens,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    )
-    assert proc.stdout is not None
-    for line in proc.stdout:
-        sink(line.rstrip("\n"))
-    proc.stdout.close()
-    return proc.wait()
+    proc = subprocess.run(tokens)
+    return proc.returncode
