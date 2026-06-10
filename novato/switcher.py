@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """AI-mode management (`/switch`).
 
 A thin, well-validated layer over the persisted ``mode`` setting. Keeping this

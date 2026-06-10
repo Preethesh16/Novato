@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """System detection — distro, package manager, and shell.
 
 Novato is distro-agnostic by design: nothing here is hardcoded to a single

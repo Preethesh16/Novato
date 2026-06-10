@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Terminal UI layer — all user-facing output, built on :mod:`rich`.
 
 The presenter owns *every* pixel Novato prints: the status badge, search-result

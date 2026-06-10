@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Novato CLI entry point.
 
 Wires the whole pipeline together and routes input. Novato accepts three shapes

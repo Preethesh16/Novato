@@ -160,4 +160,6 @@ uv run pytest
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Every dependency is open source.
+**GPLv3** (GNU General Public License v3.0 or later) — see [LICENSE](LICENSE).
+Copyleft keeps Novato and every fork free and open, which fits a tool meant to
+live inside Linux distributions. Every dependency is open source.

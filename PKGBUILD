@@ -5,7 +5,7 @@ pkgrel=1
 pkgdesc="A Linux terminal companion: install by intent, catch errors, learn as you go"
 arch=('any')
 url="https://github.com/Preethesh16/Novato"
-license=('MIT')
+license=('GPL-3.0-or-later')
 depends=(
     'python'
     'python-click'

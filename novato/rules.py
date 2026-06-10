@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Hardcoded error-correction rules for the /mistake watcher (Basic mode).
 
 Each rule inspects an :class:`ErrorContext` (the failed command, its exit code,

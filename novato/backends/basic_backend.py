@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Basic mode backend — zero dependencies, always available.
 
 This tier is the bedrock of Novato's "offline first" promise. It answers two

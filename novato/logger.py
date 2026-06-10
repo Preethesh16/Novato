@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """History logging for Novato.
 
 Per safety rule #6, *every executed command* is logged to

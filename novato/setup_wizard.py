@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """First-run onboarding wizard.
 
 Walks a brand-new user through detecting their system and (optionally) enabling a

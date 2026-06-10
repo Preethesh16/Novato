@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Rank search results by relevance for a beginner.
 
 Given the user's query, the matched intent's preferred candidate order, and the
