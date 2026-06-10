@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Online AI backend — Groq free API.
 
 Groq runs Llama-class models on custom LPU hardware, giving ~200 ms latency and

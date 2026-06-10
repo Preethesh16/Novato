@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Offline AI backend — llamafile (Mozilla).
 
 llamafile bundles an inference engine and a model into a single executable with

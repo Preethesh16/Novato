@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Static intent -> package candidates map (Basic mode).
 
 This is the heart of Novato's zero-dependency Basic mode. It maps plain-English

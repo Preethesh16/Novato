@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Safety layer — the non-negotiable guardrails.
 
 Per the project's absolute safety rules, this module enforces:

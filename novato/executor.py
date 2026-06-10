@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Command execution with live output streaming.
 
 The executor is the *only* place in Novato that runs a state-changing command,

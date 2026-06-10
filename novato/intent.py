@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Natural-language intent front-end.
 
 This module is the thin orchestration seam between a raw user query and the

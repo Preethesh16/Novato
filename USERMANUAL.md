@@ -730,7 +730,7 @@ FILES:  ~/.novato/{config.json, history.log, engine/}
 
 ---
 
-*Novato is free and open source (MIT). Contributions — new intents, error rules,
+*Novato is free and open source (GPLv3). Contributions — new intents, error rules,
 and distro support — are welcome. See [DOCUMENTATION.md](DOCUMENTATION.md) for the
 technical reference and how to extend it.*
 

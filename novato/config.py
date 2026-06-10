@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Configuration storage for Novato.
 
 Config lives in ``~/.novato/config.json``. It is intentionally small and

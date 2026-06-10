@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Novato — a Linux terminal companion that makes the terminal human.
 
 Novato ("beginner" in Spanish/Portuguese) does three things at once:
@@ -11,7 +12,7 @@ Tagline: "From novato to pro".
 
 __version__ = "0.1.0"
 __author__ = "Novato contributors"
-__license__ = "MIT"
+__license__ = "GPL-3.0-or-later"
 
 # Public, stable surface. Everything else is considered internal.
 __all__ = ["__version__"]

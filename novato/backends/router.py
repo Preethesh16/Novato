@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Backend router — the fallback chain that makes Novato unbreakable.
 
 The router assembles an ordered list of backends from the user's chosen mode and

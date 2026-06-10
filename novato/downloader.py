@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Offline-model downloader for the llamafile tier.
 
 Mozilla distributes ready-to-run **llamafiles** — single self-contained

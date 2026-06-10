@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """AI backend implementations and the fallback router.
 
 Three tiers, all behind a common interface:

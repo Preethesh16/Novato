@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Package repository search across distros.
 
 Given a list of candidate package names (from the intent layer) or a free-text

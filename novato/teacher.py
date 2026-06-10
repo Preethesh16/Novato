@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Teaching mode (`/explain`).
 
 When teaching mode is on, every action Novato takes is accompanied by a short,

@@ -7,7 +7,7 @@ name = "novato"
 version = "0.1.0"
 description = "A Linux terminal companion: install by intent, catch errors, learn as you go."
 readme = "README.md"
-license = { text = "MIT" }
+license = { text = "GPL-3.0-or-later" }
 requires-python = ">=3.10"
 authors = [{ name = "Novato contributors" }]
 keywords = [
@@ -18,7 +18,7 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: End Users/Desktop",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
