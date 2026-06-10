@@ -24,12 +24,15 @@ from . import config as _config
 from . import logger as _logger
 from . import rules as _rules
 from . import safety as _safety
+from . import switcher as _switcher
+from . import watcher as _watcher
 from .detector import SystemInfo, detect_system
 from .executor import execute
 from .intent import IntentResolver
 from .presenter import Presenter
 from .ranker import rank
 from .searcher import search_candidates
+from .teacher import Teacher
 
 
 class App:
@@ -54,6 +57,7 @@ class App:
         else:
             from .backends.router import build_router
             self.resolver = IntentResolver(build_router(self.config))
+        self.teacher = Teacher()
         self.dry_run = dry_run
 
     # -- NLPM: natural-language install flow --------------------------------
@@ -162,26 +166,8 @@ class App:
         return result.exit_code
 
     def _explain_command(self, command: str, package: str) -> None:
-        """Render a teaching block for an install command (Basic heuristics)."""
-        parts: dict[str, str] = {}
-        tokens = command.split()
-        if tokens and tokens[0] == "sudo":
-            parts["sudo"] = "run as administrator (needed for system changes)"
-            tokens = tokens[1:]
-        pm = tokens[0] if tokens else ""
-        pm_help = {
-            "pacman": "Arch Linux's package manager (like an app store)",
-            "apt": "Ubuntu/Debian's package manager",
-            "dnf": "Fedora's package manager",
-            "zypper": "openSUSE's package manager",
-        }
-        if pm in pm_help:
-            parts[pm] = pm_help[pm]
-        for flag, meaning in (("-S", "Sync — download & install from official servers"),
-                              ("install", "install the named package")):
-            if flag in tokens:
-                parts[flag] = meaning
-        parts[package] = "the exact package name being installed"
+        """Render a teaching block for an install command via the Teacher."""
+        parts = self.teacher.explain_command(command, package=package)
         self.ui.show_explanation(parts)
 
     # -- /mistake hook: analyse a failed command ----------------------------
@@ -268,9 +254,24 @@ class App:
         new = {"on": True, "off": False}.get(arg, not current)
         self.config = _config.update_config(**{key: new})
         self.ui.success(f"{key} mode is now {'on' if new else 'off'}.")
-        if key == "mistake" and new:
-            self.ui.info("[dim]Shell hooks are installed in Phase 4 — coming soon.[/]")
+        if key == "mistake":
+            self._sync_mistake_hook(new)
         return 0
+
+    def _sync_mistake_hook(self, enabled: bool) -> None:
+        """Install or remove the shell hook to match the /mistake setting."""
+        shell = self.system.shell
+        if not _watcher.supported_shell(shell):
+            self.ui.warn(
+                f"Your shell ('{shell}') isn't supported for auto-hooks yet. "
+                "Novato still works — just run commands through it directly."
+            )
+            return
+        if enabled:
+            changed, msg = _watcher.install_hook(shell)
+        else:
+            changed, msg = _watcher.uninstall_hook(shell)
+        (self.ui.info if changed else self.ui.warn)(msg)
 
     def _cmd_setup(self) -> int:
         from .setup_wizard import SetupWizard
@@ -280,11 +281,19 @@ class App:
         return 0
 
     def _cmd_switch(self, arg: str) -> int:
-        if arg not in _config.VALID_MODES:
-            self.ui.info("Modes: " + ", ".join(_config.VALID_MODES))
-            self.ui.info(f"Current: {self.config.mode}")
+        if not arg:
+            self.ui.blank()
+            self.ui.info(f"Current mode: [bold]{self.config.mode}[/]\n")
+            for mode, desc in _switcher.mode_menu():
+                marker = " ⭐" if mode == _switcher.RECOMMENDED_MODE else ""
+                self.ui.info(f"  [bold cyan]{mode:<8}[/] {desc}{marker}")
+            self.ui.info("\nUse: /switch <mode>")
             return 0
-        self.config = _config.update_config(mode=arg)
+        try:
+            self.config = _switcher.switch(arg)
+        except _switcher.ModeSwitchError as exc:
+            self.ui.error(str(exc))
+            return 1
         self.ui.success(f"Switched to {arg} mode.")
         return 0
 

@@ -67,14 +67,17 @@ responsibility and is independently testable.
 | `rules.py` | Hardcoded error-correction rules (the `/mistake` brain). |
 | `safety.py` | Confirmation gate + destructive-command blocker. |
 | `backends/basic_backend.py` | difflib + rules + intent map. Always works. |
-| `backends/llamafile_backend.py` | Local offline LLM (Phase 3). |
-| `backends/groq_backend.py` | Online Groq inference (Phase 3). |
-| `backends/router.py` | Fallback chain online → offline → basic (Phase 3). |
-| `searcher.py` | Search AUR / apt-cache / pacman / dnf (Phase 2). |
-| `ranker.py` | Rank search results by relevance (Phase 2). |
-| `presenter.py` | Rich terminal UI (Phase 2). |
-| `executor.py` | Run commands with live output streaming (Phase 2). |
-| `watcher.py` / `teacher.py` / `switcher.py` | Slash-command logic (Phase 4). |
+| `backends/llamafile_backend.py` | Local offline LLM (llamafile). |
+| `backends/groq_backend.py` | Online Groq inference. |
+| `backends/router.py` | Fallback chain online → offline → basic. |
+| `searcher.py` | Search AUR / apt-cache / pacman / dnf / zypper. |
+| `ranker.py` | Rank search results by relevance. |
+| `presenter.py` | Rich terminal UI + status badges. |
+| `executor.py` | Run commands with live output streaming. |
+| `setup_wizard.py` | First-run onboarding flow. |
+| `watcher.py` | `/mistake` shell-hook lifecycle (zsh/bash). |
+| `teacher.py` | `/explain` command glossary. |
+| `switcher.py` | `/switch` AI-mode management. |
 
 ---
 
