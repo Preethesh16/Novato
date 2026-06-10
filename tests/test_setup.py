@@ -79,8 +79,9 @@ def test_online_blank_key_degrades_to_basic(arch_system, isolated_home):
     assert cfg.has_groq is False
 
 
-def test_both_mode_sets_model_and_key(arch_system, isolated_home):
-    # Answers: choose "both", decline the model download, then paste a Groq key.
+def test_both_declining_download_degrades_to_online(arch_system, isolated_home):
+    # Choose "both" but decline the (optional) model download, then paste a key.
+    # With no model on disk, "both" honestly degrades to "online".
     answers = iter(["3", "n", "gsk_key"])
     w = SetupWizard(
         system=arch_system,
@@ -90,10 +91,41 @@ def test_both_mode_sets_model_and_key(arch_system, isolated_home):
         download_fn=lambda spec, ui: None,  # never hit the network
     )
     cfg = w.run()
-    # llamafile binary declined, but Groq key is set -> "both" still valid.
+    assert cfg.mode == "online"  # offline tier not configured -> online only
+    assert cfg.groq_api_key == "gsk_key"
+    assert cfg.llamafile_model  # a model was still selected/recorded for later
+
+
+def test_both_with_model_and_key_stays_both(arch_system, isolated_home, tmp_path):
+    # Accept the download (stubbed) and provide a key -> full "both" mode.
+    fake = tmp_path / "model.llamafile"
+    fake.write_text("#!/bin/sh\n")
+    answers = iter(["3", "y", "gsk_key"])
+    w = SetupWizard(
+        system=arch_system,
+        input_fn=lambda p: next(answers, ""),
+        verify_groq=lambda k: True,
+        open_browser=lambda u: True,
+        download_fn=lambda spec, ui: fake,
+    )
+    cfg = w.run()
     assert cfg.mode == "both"
     assert cfg.groq_api_key == "gsk_key"
-    assert cfg.llamafile_model  # a model was selected for the offline tier
+    assert cfg.llamafile_path == str(fake)
+
+
+def test_offline_declining_download_stays_basic(arch_system, isolated_home):
+    # Pick offline but decline the download -> nothing usable -> Basic mode.
+    answers = iter(["1", "n"])
+    w = SetupWizard(
+        system=arch_system,
+        input_fn=lambda p: next(answers, ""),
+        verify_groq=lambda k: True,
+        open_browser=lambda u: True,
+        download_fn=lambda spec, ui: None,
+    )
+    cfg = w.run()
+    assert cfg.mode == "basic"  # optional download declined -> safe default
 
 
 def test_offline_mode_downloads_model(arch_system, isolated_home, tmp_path):

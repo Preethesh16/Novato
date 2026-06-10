@@ -67,9 +67,20 @@ class SetupWizard:
             self._setup_online(cfg)
 
         cfg.mode = {"1": "offline", "2": "online", "3": "both"}.get(choice, "basic")
-        # If a tier the user picked didn't actually get configured, degrade.
-        if cfg.mode in ("online", "both") and not cfg.has_groq and not cfg.has_llamafile:
+        # Degrade gracefully so the saved mode reflects what's actually usable:
+        #   - offline but no model downloaded  -> basic
+        #   - online/both but no Groq key      -> the other configured tier, or basic
+        if cfg.mode == "offline" and not cfg.has_llamafile:
             cfg.mode = "basic"
+        elif cfg.mode == "online" and not cfg.has_groq:
+            cfg.mode = "basic"
+        elif cfg.mode == "both":
+            if cfg.has_groq and not cfg.has_llamafile:
+                cfg.mode = "online"
+            elif cfg.has_llamafile and not cfg.has_groq:
+                cfg.mode = "offline"
+            elif not cfg.has_groq and not cfg.has_llamafile:
+                cfg.mode = "basic"
         cfg.setup_complete = True
         _config.save_config(cfg)
 
@@ -97,12 +108,20 @@ class SetupWizard:
         self.ui.info("Basic mode is active right now — works immediately, no setup needed.\n")
 
     def _ask_mode(self) -> str:
-        self.ui.info("Want Novato to handle complex requests? Choose your AI engine:\n")
-        self.ui.info("  [1] Offline LLM (llamafile)  — private, works without internet")
-        self.ui.info("  [2] Online AI (Groq)         — fastest anywhere, completely free")
-        self.ui.info("  [3] Both                     — Groq online + llamafile fallback "
-                     "[bold yellow]⭐ RECOMMENDED[/]")
-        self.ui.info("  [s] Skip — stay on Basic mode for now\n")
+        # Printed with markup disabled so the [1]/[s] option brackets aren't
+        # swallowed by rich's markup parser ([s] = strikethrough). The offline
+        # LLM is just one option here — [s] Skip keeps you on Basic mode.
+        lines = [
+            "Want Novato to handle complex requests? Choose your AI engine:",
+            "",
+            "  [1] Offline LLM (llamafile)  — private, works without internet (optional download)",
+            "  [2] Online AI (Groq)         — fastest anywhere, completely free",
+            "  [3] Both                     — Groq online + llamafile fallback   ⭐ RECOMMENDED",
+            "  [s] Skip — stay on Basic mode for now (no AI, always works)",
+            "",
+        ]
+        for line in lines:
+            self.ui.console.print(line, markup=False)
         while True:
             choice = (self._safe_input("Pick [1/2/3/s]: ") or "s").strip().lower()
             if choice in ("1", "2", "3", "s"):
@@ -123,10 +142,12 @@ class SetupWizard:
             self.ui.success(f"Model already downloaded at {cfg.llamafile_path}.")
             return
 
+        # Opt-in: the default (empty answer) is NO so a multi-GB download is
+        # never started just by pressing Enter. The offline tier is optional.
         answer = (self._safe_input(
-            f"Download it now (~{spec.approx_size})? [Y/n]: ") or "y").strip().lower()
-        if answer in ("n", "no"):
-            self.ui.warn("Skipped the download — enable it later with "
+            f"Download it now (~{spec.approx_size})? [y/N]: ") or "n").strip().lower()
+        if answer not in ("y", "yes"):
+            self.ui.warn("No problem — skipped the download. Enable it anytime with "
                          "'novato --download-model'.")
             return
 
