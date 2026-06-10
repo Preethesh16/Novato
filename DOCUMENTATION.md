@@ -75,6 +75,7 @@ responsibility and is independently testable.
 | `presenter.py` | Rich terminal UI + status badges. |
 | `executor.py` | Run commands with live output streaming. |
 | `setup_wizard.py` | First-run onboarding flow. |
+| `downloader.py` | Offline-model registry + resumable llamafile download. |
 | `watcher.py` | `/mistake` shell-hook lifecycle (zsh/bash). |
 | `teacher.py` | `/explain` command glossary. |
 | `switcher.py` | `/switch` AI-mode management. |
@@ -128,12 +129,28 @@ unavailable, Basic mode always answers, so Novato never hard-fails.
 
 ### llamafile model selection (by RAM)
 
+Novato auto-selects an official Mozilla llamafile sized for the machine's RAM
+and downloads it (resumable, with a progress bar) into `~/.novato/engine/`. See
+[`downloader.py`](novato/downloader.py).
+
 | Total RAM | Model | Size |
 |---|---|---|
-| < 4 GB | phi3:mini | 1.5 GB |
-| < 8 GB | phi3 | 2.3 GB |
-| < 16 GB | llama3.2 | 4 GB |
-| ≥ 16 GB | llama3.1 | 8 GB |
+| < 4 GB | TinyLlama 1.1B Chat | ~1.0 GB |
+| < 8 GB | Phi-3-mini 4k Instruct | ~2.4 GB |
+| < 16 GB | Mistral-7B Instruct v0.3 | ~4.7 GB |
+| ≥ 16 GB | Llama 3.1 8B Instruct | ~5.2 GB |
+
+Download it any time:
+
+```bash
+novato --download-model            # auto-select by RAM, then enable offline mode
+novato --download-model phi3-mini  # pick a specific model
+```
+
+The download is **resumable** (a partial `.part` file is continued with an HTTP
+`Range` request) and **atomic** (it is moved into place and `chmod +x`'d only on
+success), so an interrupted multi-GB download never looks complete or corrupts
+the engine directory.
 
 ---
 

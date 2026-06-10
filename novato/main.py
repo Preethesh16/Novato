@@ -273,6 +273,38 @@ class App:
             changed, msg = _watcher.uninstall_hook(shell)
         (self.ui.info if changed else self.ui.warn)(msg)
 
+    def download_model(self, name: str = "auto") -> int:
+        """Download an offline llamafile model and enable offline mode."""
+        from . import downloader as _dl
+        from .setup_wizard import download_model_with_progress
+
+        if name in ("auto", "", None):
+            spec = _dl.select_model()
+        else:
+            spec = _dl.MODELS.get(name.lower())
+            if spec is None:
+                self.ui.error(
+                    f"Unknown model '{name}'. Available: "
+                    + ", ".join(_dl.MODELS)
+                )
+                return 1
+
+        if _dl.is_downloaded(spec):
+            path = _dl.model_path(spec)
+            self.ui.success(f"{spec.name} is already downloaded at {path}.")
+        else:
+            path = download_model_with_progress(spec, self.ui)
+            if path is None:
+                return 1
+
+        # Point config at it and switch on the offline tier.
+        new_mode = "both" if self.config.has_groq else "offline"
+        self.config = _config.update_config(
+            llamafile_path=str(path), llamafile_model=spec.name, mode=new_mode
+        )
+        self.ui.success(f"Offline mode enabled (mode: {new_mode}).")
+        return 0
+
     def _cmd_setup(self) -> int:
         from .setup_wizard import SetupWizard
 
@@ -313,6 +345,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="show everything but never execute any command")
     p.add_argument("--analyze-error", nargs=2, metavar=("COMMAND", "EXIT_CODE"),
                    help="(internal) analyse a failed command; used by the shell hook")
+    p.add_argument("--download-model", nargs="?", const="auto", metavar="MODEL",
+                   help="download an offline llamafile model (auto-selects by RAM "
+                        "if no name given) and enable offline mode")
     p.add_argument("words", nargs="*",
                    help='your request, e.g. "i want to edit videos", or a /command')
     return p
@@ -324,6 +359,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     app = App(dry_run=args.dry_run)
+
+    if args.download_model:
+        return app.download_model(args.download_model)
 
     # Shell-hook path: analyse a failed command.
     if args.analyze_error:

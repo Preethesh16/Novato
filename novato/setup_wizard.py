@@ -16,8 +16,8 @@ import webbrowser
 from typing import Callable, Optional
 
 from . import config as _config
+from . import downloader as _downloader
 from .backends.groq_backend import GroqBackend
-from .backends.llamafile_backend import select_model
 from .detector import SystemInfo, detect_system
 from .presenter import Presenter
 
@@ -35,12 +35,16 @@ class SetupWizard:
         input_fn: Callable[[str], str] = input,
         verify_groq: Optional[Callable[[str], bool]] = None,
         open_browser: Callable[[str], bool] = webbrowser.open,
+        download_fn: Optional[Callable] = None,
     ) -> None:
         self.system = system or detect_system()
         self.ui = presenter or Presenter(input_fn=input_fn)
         self._input = input_fn
         self._verify_groq = verify_groq or _default_verify_groq
         self._open_browser = open_browser
+        # Injectable so tests never hit the network; defaults to the real
+        # progress-bar download.
+        self._download_fn = download_fn or download_model_with_progress
 
     # -- Public entry -------------------------------------------------------
 
@@ -106,15 +110,33 @@ class SetupWizard:
             self.ui.warn("Please choose 1, 2, 3, or s.")
 
     def _setup_offline(self, cfg: _config.Config) -> None:
-        model, size = select_model()
+        spec = _downloader.select_model()
+        cfg.llamafile_model = spec.name
         self.ui.blank()
-        self.ui.info(f"Offline LLM: your RAM suggests the [bold]{model}[/] model (~{size}).")
-        self.ui.info("[dim]Automatic model download lands in a later release. For now, "
-                     "place a llamafile binary and set its path with /setup or in "
-                     "~/.novato/config.json (llamafile_path).[/]")
-        cfg.llamafile_model = model
-        # llamafile_path is left for the user to set; offline tier activates
-        # automatically once the binary exists.
+        self.ui.info(
+            f"Offline LLM: your RAM suggests [bold]{spec.name}[/] (~{spec.approx_size})."
+        )
+
+        # Already have it? Just point at it.
+        if _downloader.is_downloaded(spec):
+            cfg.llamafile_path = str(_downloader.model_path(spec))
+            self.ui.success(f"Model already downloaded at {cfg.llamafile_path}.")
+            return
+
+        answer = (self._safe_input(
+            f"Download it now (~{spec.approx_size})? [Y/n]: ") or "y").strip().lower()
+        if answer in ("n", "no"):
+            self.ui.warn("Skipped the download — enable it later with "
+                         "'novato --download-model'.")
+            return
+
+        path = self._download_fn(spec, self.ui)
+        if path is not None:
+            cfg.llamafile_path = str(path)
+            self.ui.success(f"Offline model ready at {path}.")
+        else:
+            self.ui.warn("Download didn't finish — you can retry with "
+                         "'novato --download-model'.")
 
     def _setup_online(self, cfg: _config.Config) -> None:
         self.ui.blank()
@@ -153,6 +175,47 @@ class SetupWizard:
             return self._input(prompt)
         except (EOFError, KeyboardInterrupt):
             return None
+
+
+def download_model_with_progress(spec, presenter: Presenter):
+    """Download ``spec`` showing a live rich progress bar.
+
+    Returns the finished :class:`pathlib.Path`, or ``None`` on failure. Used by
+    the setup wizard and the ``novato --download-model`` command.
+    """
+    from rich.progress import (
+        BarColumn,
+        DownloadColumn,
+        Progress,
+        TextColumn,
+        TimeRemainingColumn,
+        TransferSpeedColumn,
+    )
+
+    presenter.info(f"Downloading {spec.name} ({spec.approx_size})...")
+    presenter.info(f"[dim]{spec.url.split('?')[0]}[/]")
+    try:
+        with Progress(
+            TextColumn("[bold blue]{task.description}"),
+            BarColumn(),
+            DownloadColumn(),
+            TransferSpeedColumn(),
+            TimeRemainingColumn(),
+            console=presenter.console,
+        ) as progress:
+            task = progress.add_task("llamafile", total=None)
+
+            def on_progress(downloaded: int, total: Optional[int]) -> None:
+                progress.update(task, completed=downloaded, total=total)
+
+            path = _downloader.download_model(spec, progress=on_progress)
+        return path
+    except _downloader.DownloadError as exc:
+        presenter.error(str(exc))
+        return None
+    except KeyboardInterrupt:
+        presenter.warn("Download interrupted — it will resume next time.")
+        return None
 
 
 def _default_verify_groq(key: str) -> bool:
