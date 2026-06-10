@@ -80,9 +80,9 @@ def test_online_blank_key_degrades_to_basic(arch_system, isolated_home):
 
 
 def test_both_declining_download_degrades_to_online(arch_system, isolated_home):
-    # Choose "both" but decline the (optional) model download, then paste a key.
+    # Choose "both", pick model 1 (tinyllama), decline the download, then paste a key.
     # With no model on disk, "both" honestly degrades to "online".
-    answers = iter(["3", "n", "gsk_key"])
+    answers = iter(["3", "1", "n", "gsk_key"])
     w = SetupWizard(
         system=arch_system,
         input_fn=lambda p: next(answers, ""),
@@ -100,7 +100,7 @@ def test_both_with_model_and_key_stays_both(arch_system, isolated_home, tmp_path
     # Accept the download (stubbed) and provide a key -> full "both" mode.
     fake = tmp_path / "model.llamafile"
     fake.write_text("#!/bin/sh\n")
-    answers = iter(["3", "y", "gsk_key"])
+    answers = iter(["3", "1", "y", "gsk_key"])
     w = SetupWizard(
         system=arch_system,
         input_fn=lambda p: next(answers, ""),
@@ -132,7 +132,7 @@ def test_offline_mode_downloads_model(arch_system, isolated_home, tmp_path):
     # Choose offline, accept the download; download_fn is stubbed to a fake path.
     fake = tmp_path / "model.llamafile"
     fake.write_text("#!/bin/sh\n")
-    answers = iter(["1", "y"])
+    answers = iter(["1", "1", "y"])
     w = SetupWizard(
         system=arch_system,
         input_fn=lambda p: next(answers, ""),
