@@ -181,6 +181,22 @@ Confirm? [y/N]: y
 ✅ Done! Try running 'krita'.
 ```
 
+### Already-installed packages
+
+Novato checks what's on your system before doing anything. Packages you already
+have show a green **✓ installed** tag in the results list, and if you pick one,
+Novato offers to **update it through the same source it came from** instead of
+reinstalling:
+
+```text
+firefox is already installed (version 151.0.4-1, from the official repos).
+Update it through the same source? [Y/n]:
+```
+
+An AUR package is updated with your AUR helper (`yay -S …`), an official one
+with your package manager — so nothing ever drifts to the wrong source. Say `n`
+and Novato leaves everything exactly as it is.
+
 ### Tips
 
 - **Use natural words.** "a private browser", "something to record my screen",

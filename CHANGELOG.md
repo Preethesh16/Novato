@@ -30,6 +30,18 @@ and the project aims to follow [Semantic Versioning](https://semver.org/).
   stripped, but no singularisation so names like `nodejs` survive). Real
   package names resolve every time, with zero AI.
 
+#### Installed packages are detected; updates go through the original source
+- **Problem:** Picking a package that was already on the system triggered a
+  blind reinstall. Worse, an AUR package "updated" via plain pacman wouldn't
+  actually rebuild from the AUR.
+- **Fix:** New `novato/installed.py` queries what's installed (one fast call:
+  `pacman -Q` / `dpkg-query -W` / `rpm -qa`) and, on Arch, which packages are
+  foreign (`pacman -Qm` = AUR). Search results now show a green `✓ installed`
+  tag, and choosing an installed package offers an update **through the same
+  source it came from**: `yay -S` for AUR packages, `pacman -S` for official,
+  `apt install --only-upgrade`, `dnf upgrade`, `zypper update` elsewhere.
+  Declining leaves the system untouched.
+
 #### Specific apps with non-obvious package names now resolve (e.g. Brave)
 - **Problem:** Asking for Brave returned only generic browsers. The AI suggests
   the app name ("brave" / "brave-browser"), but the Arch package is
