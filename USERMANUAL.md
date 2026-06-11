@@ -487,15 +487,22 @@ The offline tier activates automatically once a valid binary is set.
 Groq is the fastest tier (~0.2 s) and **completely free** — no credit card, just
 an email signup.
 
-### Getting a key
+### Getting a key (step by step, ~1 minute)
 
-1. Run `novato /setup` and choose `[2]` or `[3]`, **or** go directly to
-   <https://console.groq.com/keys>.
-2. Sign up with an email.
-3. Create an API key and paste it when Novato asks.
+1. Run `novato /setup` and choose `[2]` or `[3]` — Novato opens
+   <https://console.groq.com/keys> in your browser and walks you through these
+   same steps on screen. (You can also visit that address directly.)
+2. **Sign up** with your email, Google, or GitHub. It's free — no credit card
+   is ever asked.
+3. Once logged in, click **"Create API Key"**.
+4. Give it any name (e.g. `novato`) and click **Submit**.
+5. A key starting with `gsk_...` is shown **once** — click **Copy**.
+6. Come back to the terminal and **paste it** when Novato asks
+   (right-click or `Ctrl+Shift+V` to paste in most terminals).
 
-Novato verifies the key and saves it to `~/.novato/config.json` (readable only by
-you, file mode `600`).
+Novato verifies the key with a live test request and saves it to
+`~/.novato/config.json` (readable only by you, file mode `600`). If you ever
+lose the key, just create a new one the same way and re-run `novato /setup`.
 
 ### Switching to it
 
