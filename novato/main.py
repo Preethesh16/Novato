@@ -77,30 +77,39 @@ class App:
         self.ui.status_line(mode, "Searching repositories...")
 
         plan = self.resolver.resolve(query)
-        if not plan.understood:
-            self.ui.warn(
-                f"I couldn't map \"{query}\" to packages yet. Try simpler words "
-                "(e.g. \"video editor\"), or enable an AI mode with /switch."
-            )
-            return 1
+        candidates = list(plan.candidates) if plan.understood else []
+
+        # If intent mapping found nothing (e.g. AI tier unreachable, or the
+        # query is a literal package name like "firefox"), fall back to a
+        # direct repo search on the meaningful words. This guarantees real
+        # package names always work, even in pure Basic mode offline.
+        if not candidates:
+            terms = self._meaningful_terms(query)
+            if not terms:
+                self.ui.warn(
+                    f"I couldn't map \"{query}\" to packages yet. Try simpler "
+                    "words (e.g. \"video editor\"), or enable an AI mode with /switch."
+                )
+                return 1
+            candidates = terms
 
         _logger.log_event(_logger.EVENT_SEARCH, query, note=plan.matched_intent)
 
         results = search_candidates(
-            plan.candidates,
+            candidates,
             self.system.package_manager,
             include_aur=self.system.supports_aur,
         )
         # Fall back to offline descriptions if live search returned nothing
         # (e.g. no network / inside a sandbox): present the curated candidates.
         if not results:
-            results = self._offline_candidates(plan.candidates)
+            results = self._offline_candidates(candidates)
         if not results:
             self.ui.warn("No matching packages found in your repositories.")
             return 1
 
         ranked = rank(
-            results, query=query, preferred_order=plan.candidates, limit=8
+            results, query=query, preferred_order=candidates, limit=8
         )
         self.ui.show_results(
             ranked,
@@ -116,6 +125,21 @@ class App:
 
         chosen = ranked[idx].result
         return self._install(chosen.name, source=chosen.source)
+
+    def _meaningful_terms(self, query: str) -> list[str]:
+        """Extract literal package-name candidates from a raw query.
+
+        Strips filler/stopwords ("install", "i want to", …) but, unlike the
+        intent normaliser, does *not* singularise — so real package names like
+        "nodejs" survive intact. "install firefox" -> ["firefox"]. Used as a
+        last-resort search when intent mapping yields nothing.
+        """
+        import re
+
+        from .backends.basic_backend import _STOPWORDS
+
+        cleaned = re.sub(r"[^a-z0-9+._-]", " ", query.lower())
+        return [t for t in cleaned.split() if t and t not in _STOPWORDS]
 
     def _offline_candidates(self, candidates: list[str]):
         """Build SearchResults from the static map when live search is empty."""

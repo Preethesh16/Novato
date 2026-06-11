@@ -10,6 +10,26 @@ and the project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Reliability fixes
+
+#### Online mode no longer silently dies behind a blocked DNS port
+- **Problem:** The connectivity check probed `1.1.1.1:53` (DNS). Many
+  networks/firewalls block outbound port 53 to external servers even when HTTPS
+  works fine, so Novato wrongly concluded "offline", dropped the Groq tier, and
+  fell back to Basic — the badge still said "Groq" but queries failed to map.
+- **Fix:** The probe now targets `api.groq.com:443` (the host the online tier
+  actually needs), with a Cloudflare `:443` fallback. This is what made
+  `install firefox` intermittently report "I couldn't map that to packages".
+
+#### Literal package names always work, even offline in Basic mode
+- **Problem:** Typing a real package name like `firefox` failed when no AI tier
+  was available, because Basic mode only maps *intents* ("web browser"), not
+  package names.
+- **Fix:** When intent mapping yields nothing, Novato now does a direct repo
+  search on the meaningful words of the query (stopwords like "install"
+  stripped, but no singularisation so names like `nodejs` survive). Real
+  package names resolve every time, with zero AI.
+
 ### Newbie-safety & UX fixes
 
 These changes came out of real first-run testing on Arch Linux, where a

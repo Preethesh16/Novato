@@ -30,13 +30,21 @@ from .groq_backend import GroqBackend
 from .llamafile_backend import LlamafileBackend
 
 
-def internet_available(host: str = "1.1.1.1", port: int = 53, timeout: float = 1.5) -> bool:
-    """Best-effort connectivity check via a fast TCP probe to a DNS server."""
-    try:
-        with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except OSError:
-        return False
+def internet_available(host: str = "api.groq.com", port: int = 443, timeout: float = 2.0) -> bool:
+    """Best-effort connectivity check.
+
+    Probes ``api.groq.com:443`` — the host the online tier actually needs —
+    rather than a DNS server on port 53, which many networks/firewalls block
+    even when general internet (and HTTPS) works fine. Falls back to Cloudflare
+    on 443 so a transient Groq-host hiccup doesn't wrongly force offline.
+    """
+    for target in ((host, port), ("1.1.1.1", 443)):
+        try:
+            with socket.create_connection(target, timeout=timeout):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 class Router:

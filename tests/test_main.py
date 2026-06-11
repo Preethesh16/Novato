@@ -60,6 +60,25 @@ def test_query_flow_dry_run_installs_nothing(arch_system, isolated_home, monkeyp
     assert called["executed"] is False  # dry-run never streams
 
 
+def test_literal_package_name_falls_back_to_direct_search(
+    arch_system, isolated_home, monkeypatch
+):
+    # "install firefox" isn't a curated intent, and the default resolver can't
+    # map it. Novato must still find it via a direct repo search on "firefox".
+    seen = {}
+    monkeypatch.setattr(
+        "novato.main.search_candidates",
+        lambda c, pm, **k: seen.update(candidates=c) or [
+            SearchResult(name=n, source="pacman", repo="extra") for n in c
+        ],
+    )
+    app = _scripted_app(arch_system, ["1", "y"], monkeypatch, dry_run=True)
+    rc = app.run_query("install firefox")
+    assert rc == 0
+    # "install" is a stopword; only the real package name is searched.
+    assert seen["candidates"] == ["firefox"]
+
+
 def test_query_flow_quit(arch_system, isolated_home, monkeypatch):
     monkeypatch.setattr("novato.main.search_candidates",
                         lambda c, pm, **k: [SearchResult(name=n, source="pacman")
