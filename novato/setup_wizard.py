@@ -142,10 +142,15 @@ class SetupWizard:
         lines = [
             "Want Novato to handle complex requests? Choose your AI engine:",
             "",
-            "  [1] Offline LLM (llamafile)  — private, works without internet (optional download)",
-            "  [2] Online AI (Groq)         — fastest anywhere, completely free",
-            "  [3] Both                     — Groq online + llamafile fallback   ⭐ RECOMMENDED",
+            "  [1] Offline LLM (llamafile)  — private, works without internet (one-time download)",
+            "  [2] Online AI (Groq)         — fastest & smartest, completely free (needs internet)",
+            "  [3] Both                     — Groq when online, local LLM when offline",
             "  [s] Skip — stay on Basic mode for now (no AI, always works)",
+            "",
+            "  Not sure? Here's the simple rule:",
+            "    • Have internet?  pick [2] Groq — best results, no download  ⭐",
+            "    • Often offline, or want 100% privacy?  pick [1]",
+            "    • Want both worlds (download needed too)?  pick [3]",
             "",
         ]
         for line in lines:
