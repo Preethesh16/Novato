@@ -710,6 +710,20 @@ back to offline/basic if Groq is unreachable, so you're never stuck.
 Open `~/.zshrc` / `~/.bashrc` and delete the block between
 `# >>> novato mistake hook >>>` and `# <<< novato mistake hook <<<`.
 
+**Updating to the latest version.**
+Don't use `pipx install --force` — on systems where pipx uses **uv** as its
+backend, `--force` fails with *"A virtual environment already exists … Use
+`--clear`"* and silently leaves the **old version** installed. Do a clean
+uninstall + install instead:
+
+```bash
+pipx uninstall novato
+pipx install git+https://github.com/Preethesh16/Novato.git
+```
+
+Your settings in `~/.novato/` (Groq key, mode, watcher) are kept — only the
+program itself is replaced, so the setup wizard won't re-run.
+
 ---
 
 ## 17. Uninstalling
