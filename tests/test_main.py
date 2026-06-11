@@ -79,6 +79,51 @@ def test_literal_package_name_falls_back_to_direct_search(
     assert seen["candidates"] == ["firefox"]
 
 
+def test_already_installed_offers_update_via_same_source(
+    arch_system, isolated_home, monkeypatch
+):
+    # An AUR-installed package must be updated through the AUR helper, not pacman.
+    import novato.main as mainmod
+    from novato import installed as instmod
+    from novato.executor import ExecResult
+
+    monkeypatch.setattr(
+        instmod, "get_info",
+        lambda pkg, pm: instmod.InstalledInfo(pkg, "1.85.115-1", instmod.ORIGIN_AUR),
+    )
+    captured = {}
+    monkeypatch.setattr(
+        mainmod, "execute",
+        lambda cmd, **k: captured.update(cmd=cmd) or ExecResult(cmd, 0, executed=True),
+    )
+    # answers: "y" = yes, update it; "y" = confirm the command.
+    app = _scripted_app(arch_system, ["y", "y"], monkeypatch)
+    rc = app._install("brave-bin", source="aur")
+    assert rc == 0
+    assert captured["cmd"] == "yay -S brave-bin"
+
+
+def test_already_installed_decline_runs_nothing(
+    arch_system, isolated_home, monkeypatch
+):
+    import novato.main as mainmod
+    from novato import installed as instmod
+
+    monkeypatch.setattr(
+        instmod, "get_info",
+        lambda pkg, pm: instmod.InstalledInfo(pkg, "151.0.4-1", instmod.ORIGIN_OFFICIAL),
+    )
+    called = {"executed": False}
+    monkeypatch.setattr(
+        mainmod, "execute",
+        lambda cmd, **k: called.__setitem__("executed", True),
+    )
+    app = _scripted_app(arch_system, ["n"], monkeypatch)
+    rc = app._install("firefox")
+    assert rc == 0
+    assert called["executed"] is False
+
+
 def test_query_flow_quit(arch_system, isolated_home, monkeypatch):
     monkeypatch.setattr("novato.main.search_candidates",
                         lambda c, pm, **k: [SearchResult(name=n, source="pacman")

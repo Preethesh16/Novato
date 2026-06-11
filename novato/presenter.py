@@ -78,9 +78,11 @@ class Presenter:
         self.console.print()
         self.console.print(f"Found {len(ranked)} option(s){where}:\n")
         width = max((len(rr.result.name) for rr in ranked), default=0)
-        # Reserve space: index (6) + name (width) + separator (4) + repo (10) + padding (4)
+        # Reserve space: index (6) + name (width) + separator (4) + repo (10) +
+        # padding (4), plus the "✓ installed" tag when any result needs it.
+        any_installed = any(rr.result.installed for rr in ranked)
         term_w = self.console.width or 100
-        desc_max = max(20, term_w - width - 24)
+        desc_max = max(20, term_w - width - 24 - (14 if any_installed else 0))
         for i, rr in enumerate(ranked, start=1):
             r = rr.result
             desc = r.description or (describe(r.name) if describe else "") or ""
@@ -95,6 +97,8 @@ class Presenter:
                 line.append(f"  — {desc}")
             if repo:
                 line.append(f"  {repo}", style="dim")
+            if r.installed:
+                line.append("  ✓ installed", style="bold green")
             self.console.print(line, no_wrap=True)
         self.console.print()
 

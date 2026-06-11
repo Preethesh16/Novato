@@ -23,6 +23,7 @@ from typing import Optional, Sequence
 
 from . import __version__
 from . import config as _config
+from . import installed as _installed
 from . import logger as _logger
 from . import rules as _rules
 from . import safety as _safety
@@ -108,6 +109,14 @@ class App:
             self.ui.warn("No matching packages found in your repositories.")
             return 1
 
+        # Mark packages that are already on this system so the list (and the
+        # install step) can say "installed" instead of offering a blind reinstall.
+        local = _installed.installed_versions(self.system.package_manager)
+        for r in results:
+            if r.name in local:
+                r.installed = True
+                r.version = r.version or local[r.name]
+
         ranked = rank(
             results, query=query, preferred_order=candidates, limit=8
         )
@@ -182,9 +191,45 @@ class App:
         if not result.succeeded:
             self.ui.warn("Refresh didn't complete cleanly — continuing anyway.")
 
+    def _update_command(self, package: str, origin: str) -> str:
+        """Build the right *update* command for an installed package's source.
+
+        An AUR package must be updated through the AUR helper (plain pacman
+        won't rebuild it); apt/dnf/zypper have dedicated upgrade verbs so we
+        never accidentally pull in a fresh install of something else.
+        """
+        pm = self.system.package_manager
+        if pm == "pacman":
+            if origin == _installed.ORIGIN_AUR and self.system.aur_helper:
+                return f"{self.system.aur_helper} -S {package}"
+            return f"sudo pacman -S {package}"
+        if pm == "apt":
+            return f"sudo apt install --only-upgrade {package}"
+        if pm == "dnf":
+            return f"sudo dnf upgrade {package}"
+        if pm == "zypper":
+            return f"sudo zypper update {package}"
+        return f"{self.system.install_cmd} {package}"
+
     def _install(self, package: str, *, source: str = "") -> int:
-        """Confirm and run the install command for a single package."""
-        if source == "aur" and self.system.aur_helper:
+        """Confirm and run the install (or update) command for a single package."""
+        # Already on the system? Offer an update through the same source it
+        # was installed from, instead of a blind reinstall.
+        info = _installed.get_info(package, self.system.package_manager)
+        if info is not None:
+            origin = ("the AUR" if info.origin == _installed.ORIGIN_AUR
+                      else "the official repos")
+            self.ui.blank()
+            self.ui.info(
+                f"[bold]{package}[/] is already installed "
+                f"(version {info.version}, from {origin})."
+            )
+            if not self.ui.ask_yes_no("Update it through the same source?",
+                                      default_no=False):
+                self.ui.info("Okay — leaving it as it is.")
+                return 0
+            command = self._update_command(package, info.origin)
+        elif source == "aur" and self.system.aur_helper:
             command = f"{self.system.aur_helper} -S {package}"
         else:
             command = f"{self.system.install_cmd} {package}"
