@@ -203,7 +203,25 @@ class SetupWizard:
     def _setup_online(self, cfg: _config.Config) -> None:
         self.ui.blank()
         self.ui.info("Setting up Groq (free, no credit card)...")
-        self.ui.info(f"Opening {GROQ_CONSOLE_URL} in your browser to create a key.")
+        self.ui.blank()
+        # Spoon-fed, numbered steps — assume the user has never seen an API
+        # key before. Printed with markup off so nothing gets eaten by rich.
+        steps = [
+            "How to get your free Groq API key (takes ~1 minute):",
+            "",
+            "  Step 1: Your browser is opening https://console.groq.com/keys",
+            "          (if it didn't open, type that address yourself)",
+            "  Step 2: Sign up with your email (or Google/GitHub) — it's free,",
+            "          no credit card is ever asked.",
+            "  Step 3: Once logged in, click the button 'Create API Key'.",
+            "  Step 4: Give it any name (e.g. 'novato') and click Submit.",
+            "  Step 5: A key starting with 'gsk_...' appears ONCE — click Copy.",
+            "  Step 6: Come back to this terminal and paste it below",
+            "          (right-click or Ctrl+Shift+V to paste in a terminal).",
+            "",
+        ]
+        for line in steps:
+            self.ui.console.print(line, markup=False)
         try:
             self._open_browser(GROQ_CONSOLE_URL)
         except Exception:
