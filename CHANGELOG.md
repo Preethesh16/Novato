@@ -126,6 +126,13 @@ the user" instead of assuming Linux knowledge.
   **the offline LLM is unnecessary if you have internet + a Groq key** — online
   is faster and the local model is only a fallback for offline/privacy. Added to
   both `README.md` and `USERMANUAL.md`.
+- Added "What is offline mode actually for?" to README and USERMANUAL: offline
+  isn't for installing (package downloads need internet anyway) — it's so the
+  mistake-watcher and teaching can still think when the network itself is the
+  problem, behind firewalls, for privacy absolutists, or during Groq outages.
+  All four fallback chains verified working (`both`+offline → llamafile→basic;
+  `both`+online → groq→llamafile→basic; `offline` → never probes the network;
+  `online`+net-down → basic rules).
 
 ---
 
