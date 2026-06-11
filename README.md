@@ -128,14 +128,33 @@ info to any online service — only the intent you type. See the
 ### Do I need the offline model if I have internet?
 
 **No.** If you have internet + a Groq key, the online tier handles everything
-and is faster. The offline model is only useful when:
+and is faster. The router handles fallback automatically in `both` mode — Groq
+runs first; the local model only kicks in when Groq is unreachable.
 
-- you're offline (plane, no Wi-Fi, metered connection),
-- Groq is down, or
-- you want everything to stay on your machine for privacy.
+### What is offline mode actually *for*, then?
 
-The router handles this automatically in `both` mode — Groq runs first; the
-local model only kicks in when Groq is unreachable. You never think about it.
+Fair question — installing packages needs the internet anyway (the download
+comes from your distro's mirrors). Offline mode isn't for installing. It's so
+Novato can still **think** — explain errors, teach, diagnose — when the network
+can't be reached:
+
+1. **The mistake-watcher — the killer case.** When is your internet most likely
+   broken? Bad Wi-Fi driver, messed-up network config, DNS problems. That's
+   exactly when you're typing failing commands and need help the most — and
+   exactly when any online AI is guaranteed to be unreachable. The offline LLM
+   can still read the error and explain *"your network service isn't running,
+   try `systemctl start NetworkManager`"*. The moment you need a mentor most is
+   the moment online AI cannot help.
+2. **Error analysis & teaching in general.** Most of Novato isn't installing —
+   it's explaining errors, teaching commands, diagnosing failures. None of that
+   needs the internet, so the offline tier keeps the brain working everywhere:
+   on a train, on a plane, behind a corporate firewall that blocks AI APIs.
+3. **Privacy absolutists.** Some people will never send a single query to any
+   API, period — even with internet available. For them offline isn't a
+   fallback, it's the requirement (`/switch offline`).
+4. **Groq simply being down** — outage, rate limit, region block. The router
+   falls through to the local model automatically, so the experience stays
+   seamless.
 
 ### Offline model tiers (which model should I pick?)
 

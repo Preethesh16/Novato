@@ -412,14 +412,32 @@ self-contained file with no background service. **Nothing leaves your machine.**
 **No.** If you have internet + a Groq key, use `online` or `both` mode — Groq
 is faster, smarter, and free. You do **not** need to download any model.
 
-The offline LLM is only for these situations:
+### So what is offline mode actually *for*?
 
-- You're offline (plane, no Wi-Fi, metered data)
-- Groq is temporarily unavailable
-- You want everything 100% local, no queries sent anywhere
+Honest answer: **not for installing** — package downloads need the internet
+anyway. Offline mode exists so Novato can still *think* (explain errors, teach,
+diagnose) when the network can't be reached. Where it genuinely matters:
 
-In `both` mode, Novato tries Groq first and only falls back to the local model
-if the internet is unreachable — you never have to think about it manually.
+1. **The mistake-watcher — the killer case.** Think about *when* your internet
+   is most likely broken: a bad Wi-Fi driver, a messed-up network config, DNS
+   problems. That's exactly when you're typing failing commands and need help
+   the most — and exactly when Groq is unreachable. The offline LLM can still
+   read the error and explain *"your network service isn't running, try
+   `systemctl start NetworkManager`"*. The moment you need a mentor most is the
+   moment online AI is guaranteed to be unavailable.
+2. **Error analysis & teaching in general.** Most of Novato isn't installing —
+   it's explaining errors, teaching commands, diagnosing why something failed.
+   None of that needs the internet, so the offline tier keeps the brain working
+   everywhere: on a train, on a plane, behind a corporate firewall that blocks
+   AI APIs.
+3. **Privacy absolutists.** Some people will never send a single query to any
+   API, period — even with internet available. For them offline isn't a
+   fallback, it's the requirement: `novato /switch offline`.
+4. **Groq simply being down** — outage, rate limit, region block. The fallback
+   keeps the experience seamless.
+
+In `both` mode, Novato tries Groq first and falls back to the local model
+automatically — you never have to think about it manually.
 
 ---
 
