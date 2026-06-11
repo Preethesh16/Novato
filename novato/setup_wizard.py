@@ -98,22 +98,42 @@ class SetupWizard:
     # -- Steps --------------------------------------------------------------
 
     def _welcome(self) -> None:
+        from rich.panel import Panel
+        from rich.text import Text
+
         self.ui.blank()
-        self.ui.info("[bold green]Welcome to Novato 🌱[/]")
-        self.ui.info('[dim]"From novato to pro"[/]\n')
-        self.ui.info("Detecting your system...")
+        banner = Text()
+        banner.append("Welcome to Novato!  🌱\n\n", style="bold green")
+        banner.append("New to Linux? Tired of remembering commands?\n", style="bold")
+        banner.append("No worries — Novato is here.\n\n")
+        banner.append("Just say what you want, in your own words:\n", style="dim")
+        banner.append('    novato "i want to edit videos"\n', style="bold cyan")
+        banner.append('    novato "something to listen to music"', style="bold cyan")
+        self.ui.console.print(Panel(
+            banner,
+            title="🌱 novato",
+            subtitle="from novato to pro",
+            border_style="green",
+            expand=False,
+            padding=(1, 3),
+        ))
+        self.ui.blank()
+        self.ui.info("Let's get you set up — it takes under a minute.")
+        self.ui.blank()
+        self.ui.info("Checking your computer...")
         s = self.system
         if s.supported:
-            self.ui.success(f"Distro:          {s.distro_name}")
             aur = f" (+{s.aur_helper} for AUR)" if s.aur_helper else (
                 " (install yay/paru for AUR)" if s.supports_aur else "")
-            self.ui.success(f"Package manager: {s.package_manager}{aur}")
-            self.ui.success(f"Shell:           {s.shell}")
+            self.ui.success(f"You're running:  {s.distro_name}")
+            self.ui.success(f"App store:       {s.package_manager}{aur}")
+            self.ui.success(f"Terminal shell:  {s.shell}")
         else:
             self.ui.warn(f"Distro '{s.distro_name}' isn't supported yet — "
                          "Basic mode features are limited here.")
         self.ui.blank()
-        self.ui.info("Basic mode is active right now — works immediately, no setup needed.\n")
+        self.ui.info("[dim]Good news: Novato already works right now (Basic mode, no "
+                     "internet or signup needed). The next step just makes it smarter.[/]\n")
 
     def _ask_mode(self) -> str:
         # Printed with markup disabled so the [1]/[s] option brackets aren't
