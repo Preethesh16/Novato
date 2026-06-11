@@ -30,6 +30,16 @@ and the project aims to follow [Semantic Versioning](https://semver.org/).
   stripped, but no singularisation so names like `nodejs` survive). Real
   package names resolve every time, with zero AI.
 
+#### Specific apps with non-obvious package names now resolve (e.g. Brave)
+- **Problem:** Asking for Brave returned only generic browsers. The AI suggests
+  the app name ("brave" / "brave-browser"), but the Arch package is
+  `brave-bin` — and candidate resolution only kept exact name matches, so the
+  suggestion was silently dropped.
+- **Fix:** Candidate resolution now picks the most plausible package: exact
+  name → name with a known packaging suffix (`-bin`, `-git`, …) → most popular
+  name-prefix match. Hyphenated candidates that find nothing are retried on
+  their first word (`brave-browser` → `brave` → finds `brave-bin`).
+
 ### Newbie-safety & UX fixes
 
 These changes came out of real first-run testing on Arch Linux, where a
