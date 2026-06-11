@@ -278,6 +278,34 @@ def search(query: str, package_manager: str, *, include_aur: bool = False) -> li
     return _dedup(results)
 
 
+# Common packaging suffixes: "brave" is published on the AUR as "brave-bin",
+# many apps ship as "<name>-git", etc. Used to recognise the real package when
+# the AI suggests the bare app name.
+_PKG_SUFFIXES = ("-bin", "-git", "-browser", "-desktop", "-appimage")
+
+
+def _best_match(cand: str, hits: list[SearchResult]) -> Optional[SearchResult]:
+    """Pick the hit that most plausibly *is* ``cand``.
+
+    Preference order: exact name -> name with a known packaging suffix
+    (``brave`` -> ``brave-bin``) -> most popular name-prefix match -> first hit.
+    """
+    if not hits:
+        return None
+    low = cand.lower()
+    exact = next((h for h in hits if h.name.lower() == low), None)
+    if exact is not None:
+        return exact
+    suffixed = {low + suf for suf in _PKG_SUFFIXES}
+    for h in hits:
+        if h.name.lower() in suffixed:
+            return h
+    prefixed = [h for h in hits if h.name.lower().startswith(low)]
+    if prefixed:
+        return max(prefixed, key=lambda h: (h.popularity, -len(h.name)))
+    return hits[0]
+
+
 def search_candidates(
     candidates: list[str],
     package_manager: str,
@@ -287,18 +315,22 @@ def search_candidates(
 ) -> list[SearchResult]:
     """Resolve a list of candidate package names against the repos.
 
-    For each candidate we run a targeted search and keep the entry whose name
-    matches the candidate exactly (falling back to the first hit). This confirms
-    a candidate actually exists in the user's repos and enriches it with a real
-    description, version, and repo label. Candidates that don't resolve are
-    dropped silently.
+    For each candidate we run a targeted search and keep the most plausible
+    match (see :func:`_best_match`). A hyphenated candidate that finds nothing
+    is retried on its first word — AI tiers often say ``brave-browser`` while
+    the real package is ``brave-bin``, which only a search for ``brave`` finds.
+    Candidates that still don't resolve are dropped silently.
     """
     found: list[SearchResult] = []
     seen: set[str] = set()
     for cand in candidates:
         hits = search(cand, package_manager, include_aur=include_aur)
-        exact = next((h for h in hits if h.name.lower() == cand.lower()), None)
-        chosen = exact or (hits[0] if hits else None)
+        if not hits and "-" in cand:
+            stem = cand.split("-", 1)[0]
+            if stem:
+                cand = stem
+                hits = search(stem, package_manager, include_aur=include_aur)
+        chosen = _best_match(cand, hits)
         if chosen is None or chosen.key() in seen:
             continue
         seen.add(chosen.key())

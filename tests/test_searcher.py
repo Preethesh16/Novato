@@ -130,3 +130,48 @@ def test_rank_name_match_bonus():
     ]
     ranked = rank(results, query="vlc", preferred_order=[])
     assert ranked[0].result.name == "vlc"
+
+
+# -- candidate resolution (suffix/prefix matching) ---------------------------
+
+def _fake_search_factory(repo_index):
+    """Build a stand-in for searcher.search backed by a {term: results} dict.
+
+    Mimics the AUR's substring semantics: a term matches a package if the term
+    appears in its name.
+    """
+    def fake_search(term, pm, *, include_aur=False):
+        return [r for r in repo_index if term.lower() in r.name.lower()]
+    return fake_search
+
+
+def test_candidates_resolve_suffix_package(monkeypatch):
+    # AI says "brave"; the AUR package is "brave-bin" -> must still resolve.
+    index = [
+        SearchResult(name="brave-bin", source="aur", repo="AUR", popularity=30),
+        SearchResult(name="brave-beta-bin", source="aur", repo="AUR", popularity=2),
+    ]
+    monkeypatch.setattr(searcher, "search", _fake_search_factory(index))
+    found = searcher.search_candidates(["brave"], "pacman", include_aur=True)
+    assert [r.name for r in found] == ["brave-bin"]
+
+
+def test_candidates_hyphenated_retry(monkeypatch):
+    # AI says "brave-browser"; nothing contains that string, so the searcher
+    # must retry on "brave" and find brave-bin.
+    index = [
+        SearchResult(name="brave-bin", source="aur", repo="AUR", popularity=30),
+    ]
+    monkeypatch.setattr(searcher, "search", _fake_search_factory(index))
+    found = searcher.search_candidates(["brave-browser"], "pacman", include_aur=True)
+    assert [r.name for r in found] == ["brave-bin"]
+
+
+def test_candidates_exact_match_still_wins(monkeypatch):
+    index = [
+        SearchResult(name="firefox-developer-edition", source="pacman", repo="extra"),
+        SearchResult(name="firefox", source="pacman", repo="extra"),
+    ]
+    monkeypatch.setattr(searcher, "search", _fake_search_factory(index))
+    found = searcher.search_candidates(["firefox"], "pacman")
+    assert [r.name for r in found] == ["firefox"]
