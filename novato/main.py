@@ -265,6 +265,9 @@ class App:
         if result.succeeded:
             self.ui.success(f"Done! Try running '{package}'.")
             return 0
+        if result.exit_code >= 128:
+            self.ui.info("Cancelled — nothing was changed.")
+            return result.exit_code
         self.ui.error(f"Install exited with code {result.exit_code}.")
         return result.exit_code
 
@@ -277,6 +280,12 @@ class App:
 
     def analyze_error(self, command: str, exit_code: int, stderr: str = "") -> int:
         """Diagnose a failed command (called by the shell hook)."""
+        # Exit codes >= 128 mean the command was killed by a signal — most
+        # commonly the user's own Ctrl+C (130) or kill (143). A deliberate
+        # cancellation is not a mistake; stay completely silent. (The hook
+        # also filters these, but old hooks in existing rc files don't.)
+        if exit_code >= 128:
+            return 0
         ctx = _rules.ErrorContext(
             command=command,
             exit_code=exit_code,
@@ -474,7 +483,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     """CLI entry point. Returns a process exit code."""
     parser = _build_parser()
     args = parser.parse_args(argv)
+    try:
+        return _dispatch(args)
+    except KeyboardInterrupt:
+        # Ctrl+C anywhere (menus, downloads, prompts): exit quietly, no
+        # traceback. 130 = 128 + SIGINT, the shell convention.
+        print("\nCancelled.")
+        return 130
 
+
+def _dispatch(args: argparse.Namespace) -> int:
+    """Route parsed arguments to the right App entry point."""
     app = App(dry_run=args.dry_run)
 
     # First-run: setup_complete is False until the wizard finishes.

@@ -29,13 +29,15 @@ END_MARKER = "# <<< novato mistake hook <<<"
 # zsh: precmd runs before each prompt; $? there is the last command's status.
 # The exported marker lets Novato detect whether *this* shell already loaded the
 # hook, so it only nags about activation when the hook genuinely isn't live.
+# Exit codes >= 128 mean the command was killed by a signal (130 = Ctrl+C,
+# 143 = SIGTERM): the user stopped it on purpose, so that's not a mistake.
 _ZSH_HOOK = f"""{BEGIN_MARKER}
 # Catches failed commands and asks Novato to explain them. Remove with:
 #   novato /mistake off
 export NOVATO_MISTAKE_ACTIVE=1
 novato_mistake_handler() {{
     local exit_code=$?
-    if [ $exit_code -ne 0 ]; then
+    if [ $exit_code -ne 0 ] && [ $exit_code -lt 128 ]; then
         local last_cmd
         last_cmd=$(fc -ln -1 2>/dev/null)
         [ -n "$last_cmd" ] && command novato --analyze-error "$last_cmd" "$exit_code" </dev/null
@@ -52,7 +54,7 @@ _BASH_HOOK = f"""{BEGIN_MARKER}
 export NOVATO_MISTAKE_ACTIVE=1
 novato_mistake_handler() {{
     local exit_code=$?
-    if [ $exit_code -ne 0 ]; then
+    if [ $exit_code -ne 0 ] && [ $exit_code -lt 128 ]; then
         local last_cmd
         last_cmd=$(history 1 | sed 's/^ *[0-9]* *//')
         [ -n "$last_cmd" ] && command novato --analyze-error "$last_cmd" "$exit_code" </dev/null
@@ -96,18 +98,33 @@ def is_installed(shell: str, *, rc_file: Optional[Path] = None) -> bool:
 
 
 def install_hook(shell: str, *, rc_file: Optional[Path] = None) -> tuple[bool, str]:
-    """Install the watcher hook into the shell rc file (idempotent).
+    """Install (or upgrade) the watcher hook in the shell rc file (idempotent).
 
-    Returns ``(changed, message)``. ``changed`` is False if the hook was already
-    present or the shell is unsupported.
+    Returns ``(changed, message)``. ``changed`` is False if the current hook
+    version was already present or the shell is unsupported. An *outdated*
+    marked block (from an older Novato) is replaced in place, so hook fixes
+    reach machines that installed the hook long ago.
     """
     if not supported_shell(shell):
         return False, f"Shell '{shell}' isn't supported for the /mistake hook yet."
     path = rc_file or rc_path(shell)
     if path is None:
         return False, "Could not locate your shell config file."
+
+    upgraded = False
     if is_installed(shell, rc_file=path):
-        return False, f"The /mistake hook is already installed in {path}."
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            return False, f"Couldn't read {path}: {exc}"
+        if hook_snippet(shell) in content:
+            return False, f"The /mistake hook is already installed in {path}."
+        # An older hook version is present: strip it and re-append the current one.
+        try:
+            path.write_text(_strip_block(content), encoding="utf-8")
+        except OSError as exc:
+            return False, f"Couldn't update {path}: {exc}"
+        upgraded = True
 
     snippet = "\n\n" + hook_snippet(shell) + "\n"
     try:
@@ -116,8 +133,9 @@ def install_hook(shell: str, *, rc_file: Optional[Path] = None) -> tuple[bool, s
             fh.write(snippet)
     except OSError as exc:
         return False, f"Couldn't write to {path}: {exc}"
+    verb = "Updated" if upgraded else "Installed"
     return True, (
-        f"Installed the /mistake hook in {path}. "
+        f"{verb} the /mistake hook in {path}. "
         f"Run 'source {path}' or restart your terminal to activate it."
     )
 

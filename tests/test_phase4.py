@@ -60,6 +60,38 @@ def test_hook_snippet_contains_markers():
     assert watcher.BEGIN_MARKER in snip and watcher.END_MARKER in snip
 
 
+@pytest.mark.parametrize("shell", ["zsh", "bash"])
+def test_hook_ignores_signal_exits(shell):
+    # Ctrl+C (130) / kill (143) are deliberate — the hook must not fire on them.
+    assert "-lt 128" in watcher.hook_snippet(shell)
+
+
+@pytest.mark.parametrize("shell", ["zsh", "bash"])
+def test_install_hook_upgrades_outdated_block(tmp_path, shell):
+    # An rc file with an OLD hook version (no signal guard) must be upgraded
+    # in place, preserving the surrounding config.
+    rc = tmp_path / f".{shell}rc"
+    old_block = (
+        f"{watcher.BEGIN_MARKER}\n"
+        "novato_mistake_handler() { old version without signal guard; }\n"
+        f"{watcher.END_MARKER}"
+    )
+    rc.write_text(f"# my config\n\n{old_block}\n\nexport PATH=$PATH:/foo\n")
+
+    changed, msg = watcher.install_hook(shell, rc_file=rc)
+    assert changed is True
+    assert "Updated" in msg
+    content = rc.read_text()
+    assert content.count(watcher.BEGIN_MARKER) == 1
+    assert "old version without signal guard" not in content
+    assert "-lt 128" in content
+    assert "# my config" in content and "export PATH=$PATH:/foo" in content
+
+    # Re-running with the current version is a no-op again.
+    changed2, _ = watcher.install_hook(shell, rc_file=rc)
+    assert changed2 is False
+
+
 # -- teacher: /explain ------------------------------------------------------
 
 def test_teacher_explains_pacman_install():

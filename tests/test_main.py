@@ -152,6 +152,32 @@ def test_analyze_error_typo(arch_system, isolated_home):
     assert rc == 0
 
 
+def test_analyze_error_stays_silent_on_ctrl_c(arch_system, isolated_home, monkeypatch):
+    # Exit 130 = the user's own Ctrl+C — not a mistake. The analyzer must
+    # return silently without even consulting the backends.
+    app = App(system=arch_system, config=cfgmod.Config(mistake=True),
+              presenter=Presenter(input_fn=lambda p: "n"))
+    spoke = {"called": False}
+    monkeypatch.setattr(app.ui, "show_correction",
+                        lambda c: spoke.__setitem__("called", True))
+    for code in (130, 143, 137):
+        assert app.analyze_error("sleep 100", code, "") == 0
+    assert spoke["called"] is False
+
+
+def test_execute_handles_ctrl_c_cleanly(monkeypatch, isolated_home):
+    # Ctrl+C during a streamed install must not raise — it returns exit 130.
+    from novato import executor as execmod2
+
+    def boom(cmd, sink):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(execmod2, "_stream", boom)
+    result = execmod2.execute("sudo pacman -S vlc")
+    assert result.exit_code == 130
+    assert result.executed is True
+    assert "cancelled" in result.reason
+
+
 def test_confirm_is_eof_safe():
     # Regression: a presenter with no input (EOF) must not crash; safest is "no".
     def raise_eof(prompt):
