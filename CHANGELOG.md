@@ -58,6 +58,26 @@ These changes came out of real first-run testing on Arch Linux, where a
 beginner hit several rough edges. Each one is meant to make Novato "do it for
 the user" instead of assuming Linux knowledge.
 
+#### Cancelling a command (Ctrl+C) is no longer treated as a mistake
+- **Problem:** Pressing Ctrl+C makes the shell report exit code 130
+  (128 + SIGINT). The mistake-watcher only checked "exit ≠ 0", so deliberately
+  stopping a command triggered Novato's error-analysis panel — "I cancelled it
+  myself, why is Novato correcting me?"
+- **Fix,** at three layers:
+  - The shell hook now skips signal exits (`exit_code < 128` guard), so no
+    `novato` process is even spawned on Ctrl+C / kill.
+  - `novato --analyze-error` itself returns silently for exit codes ≥ 128 —
+    this protects machines that still have the *old* hook text in their rc
+    file, because the hook is baked in at install time.
+  - `install_hook()` now **upgrades outdated hook blocks in place** (instead of
+    saying "already installed"), so running `/mistake on` once after updating
+    refreshes the hook to the latest version.
+- Also: Ctrl+C during a Novato-run install no longer prints a Python traceback
+  or a scary "✖ Install exited with code 130" — the executor catches the
+  interrupt and Novato says "Cancelled — nothing was changed." A top-level
+  guard in `main()` makes Ctrl+C anywhere (menus, downloads, prompts) exit
+  quietly with the conventional code 130.
+
 #### Enable the mistake-watcher during setup (no manual activation)
 - **Problem:** `novato /mistake on` writes a hook to `~/.zshrc`, but a *child
   process can never reload its parent shell* — so the watcher didn't start

@@ -270,6 +270,10 @@ zsh: command not found: pacmna
 
 Press `y` to run the fix, or `Enter`/`n` to ignore it.
 
+> **Cancelling is not a mistake.** If you stop a command yourself with
+> **Ctrl+C** (or kill it), the watcher stays completely silent — it only reacts
+> to commands that actually *failed*.
+
 ### Kinds of mistakes it catches
 
 - **Typos** in commands (`pacmna` → `pacman`)

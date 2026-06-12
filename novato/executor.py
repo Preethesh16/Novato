@@ -81,6 +81,10 @@ def execute(
 
     try:
         exit_code = _stream(run_cmd, on_line or _print_line)
+    except KeyboardInterrupt:
+        # The user pressed Ctrl+C: the child got the same SIGINT and is
+        # winding down. 130 = 128 + SIGINT, the shell convention.
+        return ExecResult(run_cmd, 130, executed=True, reason="cancelled by user")
     except FileNotFoundError as exc:
         return ExecResult(run_cmd, 127, executed=True, reason=str(exc))
     except OSError as exc:
