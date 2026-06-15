@@ -62,6 +62,32 @@ def test_skip_declining_watcher(arch_system, isolated_home):
     assert cfg.mistake is False
 
 
+def test_setup_marks_terminal_tips_as_shown(arch_system, isolated_home):
+    # Finishing setup shows the one-time tips panel and records it, so a later
+    # /setup re-run won't nag the user again.
+    answers = iter(["s"])
+    w = SetupWizard(
+        system=arch_system,
+        input_fn=lambda p: next(answers, ""),
+        verify_groq=lambda k: True,
+        open_browser=lambda u: True,
+        install_hook_fn=_STUB_HOOK,
+    )
+    w.run()
+    assert cfgmod.load_config().tips_shown is True
+
+
+def test_render_terminal_tips_is_idempotent_per_flag(arch_system, isolated_home):
+    # If tips were already shown, re-running setup must not reset the flag.
+    from novato.setup_wizard import render_terminal_tips
+    from novato.presenter import Presenter
+
+    cfgmod.save_config(cfgmod.Config(tips_shown=True, setup_complete=True))
+    # render is pure output; just confirm it runs without touching config.
+    render_terminal_tips(Presenter(input_fn=lambda p: ""))
+    assert cfgmod.load_config().tips_shown is True
+
+
 def test_online_with_valid_key(arch_system, isolated_home):
     answers = iter(["2", "gsk_validkey"])
     w = SetupWizard(
