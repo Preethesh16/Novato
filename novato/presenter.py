@@ -188,6 +188,108 @@ class Presenter:
             body, title="💡 Explain mode", border_style="cyan", expand=False,
         ))
 
+    # -- How-to answers (file/nav/process tasks) ----------------------------
+
+    def show_howto(self, answer) -> None:
+        """Render a one-line 'how do I ...' answer: the task, then the command.
+
+        Deliberately minimal — one command, one explanation — so a beginner sees
+        the answer, not a wall of options. A danger warning is shown for tasks
+        that delete data; such answers are never offered for execution.
+        """
+        self.console.print()
+        t = Text()
+        t.append("To ", style="bold")
+        t.append(answer.explanation, style="bold")
+        t.append(":")
+        self.console.print(t)
+        cmd = Text("   ")
+        cmd.append(answer.command, style="bold white on grey15")
+        self.console.print(cmd)
+        if answer.note:
+            self.console.print(f"   [dim]{answer.note}[/]")
+        if answer.dangerous:
+            self.console.print("   [bold red]⚠ This permanently deletes data — "
+                               "there is no undo.[/]")
+        elif not answer.runnable:
+            self.console.print("   [dim]Replace the example name(s) above with your "
+                               "own, then run it.[/]")
+
+    # -- Cheat sheets (/cheat) ----------------------------------------------
+
+    def show_cheat(self, category: str, blurb: str, rows: Sequence[tuple[str, str]]) -> None:
+        """Render a command cheat-sheet for one category as a clean table."""
+        from rich.table import Table
+
+        table = Table(
+            title=f"📋 {category} — {blurb}",
+            title_style="bold cyan",
+            show_header=True,
+            header_style="bold",
+            expand=False,
+            border_style="dim",
+        )
+        table.add_column("Command", style="bold white", no_wrap=True)
+        table.add_column("What it does")
+        for command, desc in rows:
+            table.add_row(command, desc)
+        self.console.print()
+        self.console.print(table)
+
+    def show_cheat_index(self, categories: Sequence[str]) -> None:
+        """List the available cheat-sheet categories when none was given."""
+        self.console.print()
+        self.console.print("Pick a topic, e.g. [bold cyan]novato /cheat files[/]:")
+        self.console.print("  " + "  ".join(f"[cyan]{c}[/]" for c in categories))
+
+    # -- Disk report (/disk) ------------------------------------------------
+
+    def show_disk(self, mounts, big_dirs, *, scanned_path: str = "",
+                  suggest_ncdu: bool = False) -> None:
+        """Render the disk-usage detective output: free space + space hogs."""
+        from rich.table import Table
+
+        self.console.print()
+        if mounts:
+            table = Table(title="💾 Disk space", title_style="bold cyan",
+                          header_style="bold", border_style="dim", expand=False)
+            table.add_column("Mounted on", style="bold")
+            table.add_column("Size")
+            table.add_column("Used")
+            table.add_column("Free", style="green")
+            table.add_column("Full")
+            for m in mounts:
+                pct_style = "red" if m.use_percent >= 90 else (
+                    "yellow" if m.use_percent >= 75 else "green")
+                table.add_row(m.mounted_on, m.size, m.used, m.avail,
+                              f"[{pct_style}]{m.use_percent}%[/]")
+            self.console.print(table)
+        if big_dirs:
+            where = f" in {scanned_path}" if scanned_path else ""
+            self.console.print(f"\nBiggest folders{where}:")
+            for d in big_dirs:
+                self.console.print(f"  [bold]{d.size:>6}[/]  {d.path}")
+        if suggest_ncdu:
+            self.console.print("\n[dim]Tip: install [bold]ncdu[/] for an "
+                               "interactive disk explorer — 'novato ncdu'.[/]")
+
+    # -- Process helper (/process) ------------------------------------------
+
+    def show_processes(self, procs, *, title: str = "Running programs") -> None:
+        """Render a numbered list of processes (for inspection or killing)."""
+        from rich.table import Table
+
+        self.console.print()
+        table = Table(title=f"⚙ {title}", title_style="bold cyan",
+                      header_style="bold", border_style="dim", expand=False)
+        table.add_column("#", style="bold cyan")
+        table.add_column("PID", style="bold")
+        table.add_column("Name")
+        table.add_column("Detail", style="dim")
+        for i, p in enumerate(procs, start=1):
+            table.add_row(str(i), str(p.pid), p.name or "(unknown)", p.detail)
+        self.console.print(table)
+
     # -- Generic helpers ----------------------------------------------------
 
     def info(self, message: str) -> None:

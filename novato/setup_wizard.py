@@ -324,6 +324,24 @@ class SetupWizard:
         for line in lines:
             self.ui.console.print(line, markup=False)
         self.ui.info("[dim]Tip: run /explain on before your first install to see what each command means.[/]")
+        # One last screen: the terminal survival shortcuts nobody tells you.
+        self._show_terminal_tips(cfg)
+
+    def _show_terminal_tips(self, cfg: _config.Config) -> None:
+        """Show the one-time 'things nobody tells you' shortcuts panel.
+
+        Shown only once ever (tracked by ``cfg.tips_shown``) so re-running
+        ``/setup`` doesn't nag a returning user. These shortcuts — especially
+        copy/paste — are the single biggest source of beginner frustration.
+        """
+        if cfg.tips_shown:
+            return
+        render_terminal_tips(self.ui)
+        cfg.tips_shown = True
+        try:
+            _config.update_config(tips_shown=True)
+        except OSError:
+            pass
 
     # -- helpers ------------------------------------------------------------
 
@@ -332,6 +350,44 @@ class SetupWizard:
             return self._input(prompt)
         except (EOFError, KeyboardInterrupt):
             return None
+
+
+def render_terminal_tips(presenter: Presenter) -> None:
+    """Render the 'things nobody tells new terminal users' shortcuts panel.
+
+    Pure presentation, kept module-level so it can be reused (e.g. by tests or a
+    future ``/tips`` command). The copy/paste warning is first on purpose: new
+    users reflexively press Ctrl+C to copy and accidentally kill their command.
+    """
+    from rich.panel import Panel
+    from rich.text import Text
+
+    tips: list[tuple[str, str]] = [
+        ("Copy text", "Ctrl+Shift+C"),
+        ("Paste text", "Ctrl+Shift+V"),
+        ("Auto-complete", "press Tab to finish a file or command name"),
+        ("Last command", "press the ↑ (up) arrow"),
+        ("Search history", "Ctrl+R, then type any part of an old command"),
+        ("Stop a command", "Ctrl+C"),
+        ("Clear the screen", "Ctrl+L"),
+    ]
+    body = Text()
+    width = max(len(label) for label, _ in tips)
+    for label, how in tips:
+        body.append(f"  {label:<{width}}  →  ", style="bold cyan")
+        body.append(how + "\n")
+    body.append("\n  ⚠ ", style="bold yellow")
+    body.append("To copy, use Ctrl+Shift+C — plain Ctrl+C STOPS the command!\n",
+                style="yellow")
+    body.append("\n  These save you hours. You're welcome. 🙂", style="dim")
+    presenter.blank()
+    presenter.console.print(Panel(
+        body,
+        title="⌨  Things nobody tells new terminal users",
+        border_style="yellow",
+        expand=False,
+        padding=(1, 2),
+    ))
 
 
 def download_model_with_progress(spec, presenter: Presenter):

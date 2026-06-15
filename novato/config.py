@@ -37,6 +37,8 @@ class Config:
     llamafile_path: str = ""
     llamafile_model: str = ""
     setup_complete: bool = False
+    tips_shown: bool = False
+    learn_progress: dict[str, Any] = field(default_factory=dict)
     version: int = 1
     extra: dict[str, Any] = field(default_factory=dict)
 

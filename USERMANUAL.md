@@ -18,6 +18,7 @@ expected output. If you just want the 60-second version, read
 4. [Feature 1 — Install by intent (NLPM)](#4-feature-1--install-by-intent-nlpm)
 5. [Feature 2 — The silent error watcher (`/mistake`)](#5-feature-2--the-silent-error-watcher-mistake)
 6. [Feature 3 — Teaching mode (`/explain`)](#6-feature-3--teaching-mode-explain)
+6b. [Doing tasks & learning the terminal](#6b-doing-tasks--learning-the-terminal)
 7. [AI modes and `/switch`](#7-ai-modes-and-switch)
 8. [The setup wizard (`/setup`)](#8-the-setup-wizard-setup)
 9. [Using the offline LLM (optional)](#9-using-the-offline-llm-optional)
@@ -332,6 +333,99 @@ Confirm? [y/N]:
 The explanation appears **after** the action is described and **never blocks**
 it. It's designed to teach you the commands so that, over time, you don't need
 Novato to run them for you — *from novato to pro.*
+
+### Explaining *any* command
+
+`/explain` also works on a command you give it directly — handy when you copy a
+command from a forum or tutorial and want to know what it actually does before
+running it:
+
+```text
+$ novato /explain ls -la /etc
+💡 Explain mode
+   ls   = list what's in a folder
+   -la  = show all files, with full details
+   /etc = the system configuration folder
+
+$ novato /explain sudo rm -rf /tmp/cache
+   sudo = run as administrator (needed for system changes)
+   rm   = remove (delete) files — permanently, there's no undo
+   -rf  = force-delete a folder and everything in it (very dangerous)
+```
+
+This is just an explanation — it never runs the command.
+
+---
+
+## 6b. Doing tasks & learning the terminal
+
+Installing software is only part of being new to Linux. Novato also helps you
+*do things* and *learn* — because a beginner knows the **task**, not the command.
+
+### Describe a task, get the command
+
+Just type what you want to do. Novato gives you the single simplest command and
+offers to run it:
+
+```text
+$ novato "unzip messi file"
+To unpack a .zip file:
+   unzip messi.zip
+Confirm? [y/N]:
+
+$ novato "how do I rename a file"
+To rename a file (it's the same 'move' command):
+   mv oldname.txt newname.txt
+   Replace the example name(s) above with your own, then run it.
+```
+
+If you'd rather be explicit, `/do "<task>"` does exactly the same thing, and
+`/man "<task>"` shows the command **without** offering to run it:
+
+```bash
+novato /do "make a script runnable"
+novato /man "extract a tar file"
+```
+
+Dangerous tasks (deleting files) are always shown with a warning and are *never*
+run for you — Novato will not delete your data.
+
+### `/learn` — the interactive tutorial
+
+`novato /learn` walks you through the terminal **one command at a time**. Each
+lesson explains an idea, lets you try it, and checks you got it before moving on.
+Your progress is saved, so you can stop after any lesson and pick up later.
+
+After the universal basics (navigation, files, permissions, finding things), it
+unlocks a bonus track tailored to **your** distro — `apt`/snap/systemctl on
+Ubuntu, `pacman`/AUR on Arch, `dnf`/SELinux on Fedora.
+
+### `/cheat` — instant reference
+
+Forgot a command? `novato /cheat <topic>` prints a quick table:
+
+```bash
+novato /cheat              # list the topics
+novato /cheat files        # touch, mkdir, cp, mv, rm, cat...
+novato /cheat shortcuts    # Tab, ↑, Ctrl+R, Ctrl+Shift+C/V...
+novato /cheat network      # ping, curl, wget, ssh...
+```
+
+### `/disk` and `/process` — inspect your system
+
+Two of the most common beginner panics have dedicated helpers:
+
+```bash
+novato /disk               # free space + the biggest folders eating it
+novato "why is my disk full"   # same thing, in plain English
+
+novato /process            # what's running (and stop it, if you want)
+novato /process 8080       # what's holding port 8080
+novato "what's using port 8080"  # same thing, in plain English
+```
+
+`/process` lets you pick a program and stop it — always with a confirmation
+first, never automatically.
 
 ---
 

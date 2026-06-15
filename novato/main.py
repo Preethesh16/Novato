@@ -22,12 +22,15 @@ import sys
 from typing import Optional, Sequence
 
 from . import __version__
+from . import cheat as _cheat
 from . import config as _config
+from . import howto as _howto
 from . import installed as _installed
 from . import logger as _logger
 from . import rules as _rules
 from . import safety as _safety
 from . import switcher as _switcher
+from . import sysinfo as _sysinfo
 from . import watcher as _watcher
 from .detector import SystemInfo, detect_system
 from .executor import execute
@@ -36,6 +39,14 @@ from .presenter import Presenter
 from .ranker import rank
 from .searcher import search_candidates
 from .teacher import Teacher
+
+# Natural-language phrases that should open the rich disk report rather than be
+# treated as a package request.
+_DISK_FULL_HINTS = (
+    "disk full", "disk is full", "out of space", "running out of space",
+    "no space left", "free up space", "taking up space", "taking space",
+    "what's taking", "what is taking", "low on space", "storage full",
+)
 
 
 class App:
@@ -66,7 +77,17 @@ class App:
     # -- NLPM: natural-language install flow --------------------------------
 
     def run_query(self, query: str) -> int:
-        """Resolve an intent, search repos, present options, install one."""
+        """Resolve an intent, search repos, present options, install one.
+
+        Before treating the query as a package request, we check whether it's
+        actually a *task* the user wants to do in the terminal ("unzip this",
+        "why is my disk full", "what's using port 8080"). Those are answered
+        directly — Novato is a terminal companion, not just an installer.
+        """
+        handled = self._try_task(query)
+        if handled is not None:
+            return handled
+
         if not self.system.supported:
             self.ui.error(
                 f"Your distro ({self.system.distro_name}) isn't supported yet. "
@@ -134,6 +155,183 @@ class App:
 
         chosen = ranked[idx].result
         return self._install(chosen.name, source=chosen.source)
+
+    # -- Task helper: "how do I ...", disk, processes -----------------------
+
+    def _try_task(self, query: str) -> Optional[int]:
+        """Handle a query that's a *task* rather than a package request.
+
+        Returns an exit code if handled, or ``None`` to fall through to the
+        normal package-search flow.
+        """
+        lower = query.lower()
+
+        # "why is my disk full" and friends -> the rich disk report.
+        if any(hint in lower for hint in _DISK_FULL_HINTS):
+            return self._cmd_disk()
+
+        # "what's using port 8080" -> the process/port helper.
+        if "port" in lower and _sysinfo.extract_port(query) is not None:
+            return self._cmd_process(query)
+
+        # Single-command tasks ("unzip this", "rename a file"). A high threshold
+        # keeps genuine package requests ("video editor") out of this path.
+        answer = _howto.resolve(query, threshold=0.72)
+        if answer is not None:
+            return self._present_howto(answer, offer_run=True)
+        return None
+
+    def _present_howto(self, answer, *, offer_run: bool) -> int:
+        """Show a how-to answer and, when safe, offer to run it."""
+        if answer.command == _howto.SYNC_SENTINEL:
+            answer.command = self._system_update_command()
+            answer.runnable = False  # whole-system updates: show, let them run it
+
+        self.ui.show_howto(answer)
+
+        if not offer_run or not answer.runnable or answer.dangerous:
+            return 0
+
+        command = answer.command
+        verdict = _safety.validate(command)
+        if not verdict.allowed:
+            return 0  # already shown for reference; safety won't run it
+        command = verdict.sanitized or command
+
+        if self.dry_run:
+            self.ui.info("[dim](dry-run: nothing was executed)[/]")
+            return 0
+        self.ui.blank()
+        if not self.ui.confirm(command):
+            self.ui.info("Okay — didn't run it.")
+            return 0
+        result = execute(command, on_line=lambda ln: self.ui.console.print(ln, markup=False))
+        return result.exit_code if result.executed else 0
+
+    def _system_update_command(self) -> str:
+        """The right 'update everything' command for this distro (for display)."""
+        pm = self.system.package_manager
+        return {
+            "pacman": "sudo pacman -Syu",
+            "apt": "sudo apt update && sudo apt upgrade",
+            "dnf": "sudo dnf upgrade",
+            "zypper": "sudo zypper update",
+        }.get(pm, self.system.sync_cmd or "your package manager's update command")
+
+    def _cmd_cheat(self, arg: str) -> int:
+        """Show a command cheat-sheet, or the list of topics."""
+        if not arg:
+            self.ui.show_cheat_index(_cheat.categories())
+            return 0
+        category = _cheat.resolve_category(arg)
+        if category is None:
+            self.ui.warn(f"No cheat-sheet called '{arg}'.")
+            self.ui.show_cheat_index(_cheat.categories())
+            return 1
+        self.ui.show_cheat(category, _cheat.CATEGORY_BLURBS.get(category, ""),
+                           _cheat.get(category))
+        return 0
+
+    def _cmd_man(self, task: str) -> int:
+        """Translate a *task* into the single command that does it (no execution)."""
+        task = task.strip().strip('"').strip("'")
+        if not task:
+            self.ui.info('Tell me the task, e.g.  novato /man "unzip a file"')
+            return 1
+        answer = _howto.resolve(task, threshold=0.45)
+        if answer is None:
+            self.ui.warn(f"I don't have a one-liner for \"{task}\" yet.")
+            self.ui.info("Try [bold]/cheat[/] for a topic list, or describe it differently.")
+            return 1
+        if answer.command == _howto.SYNC_SENTINEL:
+            answer.command = self._system_update_command()
+        self.ui.show_howto(answer)
+        return 0
+
+    def _cmd_do(self, task: str) -> int:
+        """Explicit entry point for a terminal task; offers to run it."""
+        task = task.strip().strip('"').strip("'")
+        if not task:
+            self.ui.info('Tell me what to do, e.g.  novato /do "rename a file"')
+            return 1
+        answer = _howto.resolve(task, threshold=0.45)
+        if answer is None:
+            self.ui.warn(f"I'm not sure how to do \"{task}\" yet.")
+            self.ui.info("Try [bold]/cheat[/] for common commands.")
+            return 1
+        return self._present_howto(answer, offer_run=True)
+
+    def _cmd_disk(self) -> int:
+        """Disk-space detective: free space plus the biggest folders."""
+        home = os.path.expanduser("~")
+        mounts = _sysinfo.disk_mounts()
+        big = _sysinfo.largest_dirs(home, limit=8)
+        if not mounts and not big:
+            self.ui.warn("Couldn't read disk information on this system.")
+            return 1
+        self.ui.show_disk(mounts, big, scanned_path=home,
+                          suggest_ncdu=not _sysinfo.has_ncdu())
+        return 0
+
+    def _cmd_process(self, arg: str) -> int:
+        """Show what's running (or what holds a port) and offer to stop it."""
+        port = _sysinfo.extract_port(arg) if arg else None
+        if port is not None:
+            procs = _sysinfo.processes_on_port(port)
+            if not procs:
+                self.ui.info(f"Nothing is listening on port {port}.")
+                return 0
+            self.ui.show_processes(procs, title=f"Using port {port}")
+        else:
+            procs = _sysinfo.top_processes(limit=10)
+            if not procs:
+                self.ui.warn("Couldn't read the list of running programs.")
+                return 1
+            self.ui.show_processes(procs, title="Heaviest programs (by memory)")
+
+        if self.dry_run:
+            return 0
+        self.ui.blank()
+        self.ui.info("Stop one of these? Enter its number, or 'q' to leave them be.")
+        idx = self.ui.prompt_choice(len(procs))
+        if idx is None:
+            return 0
+        command = f"kill {procs[idx].pid}"
+        verdict = _safety.validate(command)
+        if not verdict.allowed:
+            self.ui.error(verdict.reason)
+            return 2
+        if not self.ui.confirm(command):
+            self.ui.info("Okay — left it running.")
+            return 0
+        result = execute(command, on_line=lambda ln: self.ui.console.print(ln, markup=False))
+        if result.succeeded:
+            self.ui.success(f"Sent the stop signal to process {procs[idx].pid}.")
+        return result.exit_code if result.executed else 0
+
+    def _cmd_learn(self) -> int:
+        """Launch the interactive, distro-aware terminal tutorial."""
+        from .learner import Tutorial
+
+        tutorial = Tutorial(system=self.system, presenter=self.ui, config=self.config)
+        return tutorial.run()
+
+    def _cmd_explain(self, rest: list[str]) -> int:
+        """Toggle teaching mode, or explain a specific command the user typed.
+
+        ``/explain on|off`` (or bare ``/explain``) toggles the teaching block on
+        installs. ``/explain ls -la /etc`` instead breaks that exact command
+        down, flag by flag — so a beginner can ask about *anything*.
+        """
+        if not rest or rest[0].lower() in ("on", "off"):
+            return self._cmd_toggle("explain", rest[0].lower() if rest else "")
+        command = " ".join(rest)
+        parts = self.teacher.explain_arbitrary_command(command)
+        if not parts:
+            self.ui.warn(f"I don't recognise anything in \"{command}\" to explain yet.")
+            return 1
+        self.ui.show_explanation(parts)
+        return 0
 
     def _meaningful_terms(self, query: str) -> list[str]:
         """Extract literal package-name candidates from a raw query.
@@ -313,16 +511,24 @@ class App:
     # -- Slash commands -----------------------------------------------------
 
     def slash(self, parts: list[str]) -> int:
-        """Dispatch a /slash command. Full implementations land in Phase 4."""
+        """Dispatch a /slash command."""
         name = parts[0].lstrip("/").lower()
-        arg = parts[1].lower() if len(parts) > 1 else ""
+        rest = parts[1:]                       # preserves case (paths, filenames)
+        arg = rest[0].lower() if rest else ""  # for simple single-word commands
+        joined = " ".join(rest)                # for free-text task commands
         handler = {
             "status": self._cmd_status,
             "help": self._cmd_help,
-            "explain": lambda: self._cmd_toggle("explain", arg),
+            "explain": lambda: self._cmd_explain(rest),
             "mistake": lambda: self._cmd_toggle("mistake", arg),
             "switch": lambda: self._cmd_switch(arg),
             "setup": self._cmd_setup,
+            "cheat": lambda: self._cmd_cheat(arg),
+            "man": lambda: self._cmd_man(joined),
+            "do": lambda: self._cmd_do(joined),
+            "disk": self._cmd_disk,
+            "process": lambda: self._cmd_process(joined),
+            "learn": self._cmd_learn,
         }.get(name)
         if handler is None:
             self.ui.warn(f"Unknown command '/{name}'. Try /help.")
@@ -348,9 +554,24 @@ class App:
         lines = [
             "Novato — from novato to pro",
             "",
+            "  INSTALL & DO THINGS",
             '  novato "what you want"                install software by describing it',
+            '  novato "unzip this file"              do a terminal task in plain English',
+            '  /do "rename a file"                   same, as an explicit command',
+            '  /man "extract a tar file"             show the one command for a task',
+            "",
+            "  LEARN & LOOK UP",
+            "  /learn                                interactive step-by-step tutorial",
+            "  /cheat [topic]                        quick command reference (files, network...)",
+            "  /explain ls -la                       explain any command, flag by flag",
+            "  /explain [on|off]                     toggle teaching mode on installs",
+            "",
+            "  INSPECT YOUR SYSTEM",
+            "  /disk                                 see what's filling up your disk",
+            "  /process [port]                       see what's running / using a port",
+            "",
+            "  SETTINGS",
             "  /switch [online|offline|both|basic]   change AI mode",
-            "  /explain [on|off]                     toggle teaching mode",
             "  /mistake [on|off]                     toggle the silent error watcher",
             "  /status                               show current settings",
             "  /setup                                re-run the first-time setup wizard",
@@ -479,10 +700,42 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _split_flags(raw: list[str]) -> tuple[list[str], list[str]]:
+    """Separate leading global flags from the free-text/slash payload.
+
+    A query or slash command may legitimately contain dashes — ``/explain ls
+    -la``, ``find . -name x`` — which argparse would mistake for options. Global
+    flags only ever appear at the *front*, so we peel those off (with their
+    values) and pass everything from the first command/word onward verbatim.
+    """
+    head: list[str] = []
+    i, n = 0, len(raw)
+    while i < n:
+        tok = raw[i]
+        if tok in ("--version", "-h", "--help", "--dry-run"):
+            head.append(tok)
+            i += 1
+        elif tok == "--analyze-error":
+            head.extend(raw[i:i + 3])  # flag + its two values
+            i += 3
+        elif tok == "--download-model":
+            head.append(tok)
+            i += 1
+            if i < n and not raw[i].startswith(("/", "-")):
+                head.append(raw[i])
+                i += 1
+        else:
+            break  # first non-global token: payload begins here
+    return head, raw[i:]
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """CLI entry point. Returns a process exit code."""
+    raw = list(sys.argv[1:] if argv is None else argv)
+    head, payload = _split_flags(raw)
     parser = _build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(head)
+    args.words = payload
     try:
         return _dispatch(args)
     except KeyboardInterrupt:
