@@ -30,15 +30,39 @@ Confirm? [y/N]: y
 
 ## What it does
 
-Novato does three things at once:
+Novato is a full terminal companion for newcomers:
 
 1. **Install by intent** — type what you *want* ("a private browser"), not the
    exact package name. Novato detects your distro, searches the right
    repositories, and shows you the exact command before running anything.
-2. **Catch mistakes** — an opt-in, *silent* watcher only speaks when a command
+2. **Do tasks in plain English** — *"unzip this file"*, *"rename a file"*,
+   *"why is my disk full"*. Novato gives you the one simple command for the job
+   and offers to run it. A beginner knows the *task*, not the command name —
+   so describe the task.
+3. **Catch mistakes** — an opt-in, *silent* watcher only speaks when a command
    fails. It explains the error in plain English and offers a fix.
-3. **Teach as you go** — turn on `/explain` and every action comes with a short,
-   respectful explanation of what each command and flag does.
+4. **Learn, the easy way** — a step-by-step `/learn` tutorial (one command at a
+   time, with a check that it landed), instant `/cheat` references, and
+   `/explain ls -la` to break down *any* command flag by flag.
+
+### Beyond installing — describe the task
+
+```text
+$ novato "unzip messi file"
+
+To unpack a .zip file:
+   unzip messi.zip
+Confirm? [y/N]:
+
+$ novato "why is my disk full"
+💾 Disk space + the biggest folders eating your space...
+
+$ novato /explain chmod 755 script.sh
+💡 chmod = change permissions · 755 = owner can do everything, others can read/run
+```
+
+You don't have to remember command names — but Novato teaches them as you go, so
+one day you won't need it. That's the point.
 
 ---
 
@@ -89,13 +113,24 @@ sudo pacmna -S vlc        # typo → Novato catches it and suggests the fix
 
 | Command | What it does |
 |---|---|
+| `/do "<task>"` | Do a terminal task by describing it (e.g. `/do "rename a file"`) |
+| `/man "<task>"` | Show the one command for a task — no execution, just the answer |
+| `/learn` | Interactive, step-by-step terminal tutorial (distro-aware) |
+| `/cheat [topic]` | Quick command reference (`files`, `network`, `shortcuts`, …) |
+| `/explain <command>` | Explain any command flag by flag (e.g. `/explain ls -la /etc`) |
+| `/explain [on\|off]` | Toggle teaching mode on installs |
+| `/disk` | See what's filling up your disk (free space + biggest folders) |
+| `/process [port]` | See what's running, or what's using a port — and stop it |
 | `/switch [online\|offline\|both\|basic]` | Change AI mode (no arg shows a menu) |
-| `/explain [on\|off]` | Toggle teaching mode |
 | `/mistake [on\|off]` | Toggle the silent error watcher |
 | `/status` | Show current mode, toggles, distro, and shell |
 | `/setup` | Re-run the first-time setup wizard |
 | `/help` | Show all commands |
-| `/update` | Update Novato to the latest version |
+
+> **Tip:** anything `/do` and `/man` can do, you can also just *type* — `novato
+> "unzip this file"` works the same. `/disk` and `/process` are named shortcuts
+> for `novato "why is my disk full"` and `novato "what's using port 8080"`. The
+> slash forms are there for when you want to be explicit.
 
 ---
 

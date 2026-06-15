@@ -10,6 +10,66 @@ and the project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### New features — a companion for absolute beginners
+
+A new-to-Linux user has to climb a much taller wall than "which package do I
+install": navigating folders, copying and deleting files, reading errors,
+freeing disk space. This release widens Novato from an installer into a full
+terminal companion, while keeping the core promise: one tool, plain English,
+always works offline.
+
+#### Describe a task, get the command (`novato.howto`, `/do`, `/man`)
+- **Why:** Beginners know the *task* ("unzip this file"), not the command
+  (`tar`/`unzip`). Asking them to look up a man page assumes the very knowledge
+  they lack.
+- **What:** A curated task→command knowledge base (`novato/howto.py`, ~180
+  phrasings) answers "how do I ..." with **one** simple command and a one-line
+  explanation. It's integrated into the normal `novato "..."` flow (a high match
+  threshold keeps genuine package requests untouched), with explicit `/do
+  "<task>"` (offers to run it) and `/man "<task>"` (shows it only) entry points.
+  Argument extraction fills in the user's own filename when given (`unzip messi
+  file` → `unzip messi.zip`); multi-argument and destructive tasks are shown for
+  reference and never auto-run.
+
+#### Interactive, distro-aware tutorial (`/learn`)
+- **Why:** The fastest way to *stop* needing a crutch is to learn — one step at
+  a time, with feedback.
+- **What:** `novato/learner.py` teaches one command per lesson (explain → try →
+  check), saves progress between runs, and after the universal basics unlocks a
+  track tailored to the user's distro (Ubuntu/Debian, Arch, or Fedora). Lessons
+  only ever execute vetted read-only commands; deleting is taught as a concept,
+  never run.
+
+#### Instant cheat-sheets (`/cheat`)
+- **What:** `novato/cheat.py` prints a clean, plain-English reference table per
+  topic (`files`, `network`, `shortcuts`, …) — fully offline, no AI.
+
+#### Explain any command, not just installs (`/explain <command>`)
+- **Why:** People paste commands from forums without knowing what they do.
+- **What:** `/explain ls -la /etc` now breaks down an arbitrary command flag by
+  flag, with a glossary of ~40 everyday commands, their common flags, and
+  well-known paths (`teacher.explain_arbitrary_command`). `/explain on|off`
+  still toggles teaching mode.
+
+#### Disk and process helpers (`/disk`, `/process`)
+- **Why:** "My disk is full" and "something's using a port" have no GUI to fall
+  back on for a terminal newcomer.
+- **What:** `novato/sysinfo.py` powers `/disk` (free space + biggest folders,
+  suggests `ncdu`) and `/process [port]` (what's running / holding a port, with
+  a confirmed, never-automatic stop). Both are also reachable in plain English
+  ("why is my disk full", "what's using port 8080").
+
+#### One-time "things nobody tells you" tips in setup
+- **What:** Setup now ends with a one-time panel covering the survival
+  shortcuts — copy/paste is `Ctrl+Shift+C/V` (not `Ctrl+C`, which kills the
+  command!), Tab completion, `↑` history, `Ctrl+R`, `Ctrl+C`, `Ctrl+L`. Tracked
+  by `config.tips_shown` so re-running `/setup` doesn't nag.
+
+#### Argument parsing handles dashes in commands/queries
+- **Fix:** `main()` now peels leading global flags off itself, so a command like
+  `/explain ls -la` or `find . -name x` no longer makes argparse choke on the
+  embedded `-la`/`-name`.
+
 ### Reliability fixes
 
 #### Online mode no longer silently dies behind a blocked DNS port

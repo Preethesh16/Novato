@@ -77,8 +77,12 @@ responsibility and is independently testable.
 | `setup_wizard.py` | First-run onboarding flow. |
 | `downloader.py` | Offline-model registry + resumable llamafile download. |
 | `watcher.py` | `/mistake` shell-hook lifecycle (zsh/bash). |
-| `teacher.py` | `/explain` command glossary. |
+| `teacher.py` | `/explain` command glossary (installs + any command). |
 | `switcher.py` | `/switch` AI-mode management. |
+| `howto.py` | Task → single-command knowledge base (`/do`, `/man`, NLPM tasks). |
+| `cheat.py` | Static command cheat-sheets (`/cheat`). |
+| `sysinfo.py` | Disk + process inspection helpers (`/disk`, `/process`). |
+| `learner.py` | Interactive, distro-aware tutorial engine (`/learn`). |
 
 ---
 
@@ -268,6 +272,30 @@ def my_rule(ctx: ErrorContext) -> Optional[Correction]:
 ```
 
 Add a test in `tests/test_watcher.py`.
+
+### Add a new "how-to" task
+
+Edit [`howto.py`](novato/howto.py). Append a `HowtoEntry` to `_ENTRIES` with the
+phrasings a user might type, a command template (use a single `{arg}` for a
+fillable filename and set `default_arg`), a one-line explanation, and a
+category:
+
+```python
+HowtoEntry(("watch a folder for changes", "monitor a folder"),
+           "inotifywait -m {arg}", "watch a folder for file changes",
+           "files", default_arg="foldername"),
+```
+
+Mark `dangerous=True` for anything that deletes/overwrites — such tasks are shown
+for reference and never auto-run. Run `uv run pytest tests/test_howto.py`.
+
+### Add a `/learn` lesson
+
+Edit [`learner.py`](novato/learner.py). Append a `Lesson` to `UNIVERSAL` (or a
+distro package). Use `expected`/`run_demo` for a hands-on, vetted read-only
+command, or `quiz=(question, accepted_substring)` for a comprehension check.
+Never run a destructive command in a lesson. Run `uv run pytest
+tests/test_learner.py`.
 
 ### Add a new distro
 
