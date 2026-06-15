@@ -205,3 +205,82 @@ def test_slash_explain_toggle(arch_system, isolated_home):
               presenter=Presenter(input_fn=lambda p: ""))
     app.slash(["/explain", "on"])
     assert cfgmod.load_config().explain is True
+
+
+# -- New beginner-facing commands ------------------------------------------
+
+def test_howto_task_short_circuits_package_search(arch_system, isolated_home, monkeypatch):
+    # "unzip messi file" is a terminal task, not a package request: it must be
+    # answered directly and must NOT trigger a repository search.
+    searched = {"called": False}
+    monkeypatch.setattr("novato.main.search_candidates",
+                        lambda *a, **k: searched.__setitem__("called", True) or [])
+    app = _scripted_app(arch_system, ["n"], monkeypatch, dry_run=True)
+    rc = app.run_query("unzip messi file")
+    assert rc == 0
+    assert searched["called"] is False
+
+
+def test_package_query_still_reaches_search(arch_system, isolated_home, monkeypatch):
+    # A genuine package intent must fall through to the package flow.
+    seen = {"called": False}
+    monkeypatch.setattr(
+        "novato.main.search_candidates",
+        lambda c, pm, **k: seen.__setitem__("called", True) or [
+            SearchResult(name=n, source="pacman", repo="extra") for n in c
+        ],
+    )
+    app = _scripted_app(arch_system, ["q"], monkeypatch, dry_run=True)
+    app.run_query("i want to edit videos")
+    assert seen["called"] is True
+
+
+def test_disk_full_query_routes_to_disk(arch_system, isolated_home, monkeypatch):
+    from novato import sysinfo as sysmod
+    routed = {"disk": False}
+    monkeypatch.setattr(sysmod, "disk_mounts",
+                        lambda **k: routed.__setitem__("disk", True) or [])
+    monkeypatch.setattr(sysmod, "largest_dirs", lambda *a, **k: [])
+    app = App(system=arch_system, config=cfgmod.Config(),
+              presenter=Presenter(input_fn=lambda p: "q"))
+    app.run_query("why is my disk full")
+    assert routed["disk"] is True
+
+
+def test_slash_cheat_known_and_unknown(arch_system, isolated_home):
+    app = App(system=arch_system, config=cfgmod.Config(),
+              presenter=Presenter(input_fn=lambda p: ""))
+    assert app.slash(["/cheat", "files"]) == 0
+    assert app.slash(["/cheat"]) == 0
+    assert app.slash(["/cheat", "nonsense"]) == 1
+
+
+def test_slash_man_known_and_unknown(arch_system, isolated_home):
+    app = App(system=arch_system, config=cfgmod.Config(),
+              presenter=Presenter(input_fn=lambda p: ""))
+    assert app.slash(["/man", "unzip", "a", "file"]) == 0
+    assert app.slash(["/man", "frobnicate", "the", "widget"]) == 1
+
+
+def test_slash_explain_command_does_not_toggle(arch_system, isolated_home):
+    # /explain with a real command explains it rather than toggling the setting.
+    app = App(system=arch_system, config=cfgmod.Config(explain=False),
+              presenter=Presenter(input_fn=lambda p: ""))
+    assert app.slash(["/explain", "ls", "-la"]) == 0
+    assert cfgmod.load_config().explain is False  # toggle untouched
+
+
+def test_slash_process_lists_and_can_decline(arch_system, isolated_home, monkeypatch):
+    from novato import sysinfo as sysmod
+    monkeypatch.setattr(sysmod, "top_processes",
+                        lambda **k: [sysmod.ProcInfo(pid=42, name="firefox")])
+    # 'q' at the kill prompt -> nothing is killed.
+    app = App(system=arch_system, config=cfgmod.Config(),
+              presenter=Presenter(input_fn=lambda p: "q"))
+    assert app.slash(["/process"]) == 0
+
+
+def test_update_system_command_is_distro_specific(arch_system, isolated_home):
+    app = App(system=arch_system, config=cfgmod.Config(),
+              presenter=Presenter(input_fn=lambda p: "n"))
+    assert app._system_update_command() == "sudo pacman -Syu"
