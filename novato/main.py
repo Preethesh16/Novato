@@ -674,7 +674,30 @@ class App:
             self.ui.error(str(exc))
             return 1
         self.ui.success(f"Switched to {arg} mode.")
+        self._warn_if_mode_not_ready()
         return 0
+
+    def _warn_if_mode_not_ready(self) -> None:
+        """Flag a mode the user just selected that can't actually run yet.
+
+        The router falls back to Basic automatically, so nothing breaks — but a
+        beginner who picks 'online' with no key would otherwise have no idea why
+        answers aren't smarter. Warn, and point at the exact fix.
+        """
+        mode = self.config.mode
+        needs_groq = mode in ("online", "both") and not self.config.has_groq
+        needs_model = mode in ("offline", "both") and not self.config.has_llamafile
+
+        if needs_groq:
+            self.ui.warn(
+                "No Groq API key is set yet, so this mode falls back to Basic. "
+                "Run /setup to add a free key (takes a minute)."
+            )
+        if needs_model:
+            self.ui.warn(
+                "No offline model is downloaded yet, so this mode falls back to "
+                "Basic. Run  novato --download-model  to enable it."
+            )
 
 
 # ---------------------------------------------------------------------------

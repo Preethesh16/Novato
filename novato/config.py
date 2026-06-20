@@ -82,13 +82,22 @@ def ensure_config_dir() -> Path:
 
 
 def _coerce(raw: dict[str, Any]) -> Config:
-    """Build a Config from raw JSON, ignoring unknown keys gracefully."""
+    """Build a Config from raw JSON, ignoring unknown keys gracefully.
+
+    The persisted ``extra`` bucket is unwrapped back into ``cfg.extra`` rather
+    than treated as an unknown key — otherwise every save/load cycle would nest
+    it one level deeper (``{"extra": {"extra": ...}}``).
+    """
     known = {f for f in Config.__dataclass_fields__ if f != "extra"}  # type: ignore[attr-defined]
     kwargs = {k: v for k, v in raw.items() if k in known}
-    extra = {k: v for k, v in raw.items() if k not in known}
+    # Genuinely unknown keys (forward-compat from a newer version) go into extra.
+    unknown = {k: v for k, v in raw.items() if k not in known and k != "extra"}
     cfg = Config(**kwargs)
-    if extra:
-        cfg.extra.update(extra)
+    persisted_extra = raw.get("extra")
+    if isinstance(persisted_extra, dict):
+        cfg.extra.update(persisted_extra)
+    if unknown:
+        cfg.extra.update(unknown)
     return cfg
 
 

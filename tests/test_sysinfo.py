@@ -64,3 +64,33 @@ def test_extract_port():
     assert sysinfo.extract_port("free up port 22 please") == 22
     assert sysinfo.extract_port("no number here") is None
     assert sysinfo.extract_port("port 99999") is None  # out of range
+
+
+def test_top_processes_with_real_ps_returns_results():
+    """Regression: the ps format spec must be valid so real ps returns rows.
+
+    Uses the real `ps` (no mock) because the original bug was a malformed
+    column specifier ('mem=' instead of '%mem=') that only fails against the
+    actual binary — a mocked runner would hide it.
+    """
+    procs = sysinfo.top_processes(limit=5)
+    assert procs, "top_processes returned nothing — ps spec is likely malformed"
+    assert all(p.pid > 0 for p in procs)
+    assert all(p.name for p in procs)
+
+
+def test_top_processes_builds_valid_ps_spec():
+    """The generated ps command must use '%mem'/'%cpu', never a bare 'mem'/'cpu'."""
+    seen = {}
+
+    def fake_run(cmd: str) -> str:
+        seen["cmd"] = cmd
+        return "1234 bash 1.2\n"
+
+    sysinfo.top_processes(run=fake_run, sort_by="mem")
+    assert "%mem=" in seen["cmd"]
+    assert ",mem=" not in seen["cmd"]
+
+    sysinfo.top_processes(run=fake_run, sort_by="cpu")
+    assert "%cpu=" in seen["cmd"]
+    assert ",cpu=" not in seen["cmd"]

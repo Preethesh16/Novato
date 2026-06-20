@@ -284,3 +284,29 @@ def test_update_system_command_is_distro_specific(arch_system, isolated_home):
     app = App(system=arch_system, config=cfgmod.Config(),
               presenter=Presenter(input_fn=lambda p: "n"))
     assert app._system_update_command() == "sudo pacman -Syu"
+
+
+def test_switch_to_online_without_key_warns(arch_system, isolated_home, monkeypatch, capsys):
+    cfgmod.save_config(cfgmod.Config(mode="basic"))
+    app = _scripted_app(arch_system, [], monkeypatch)
+    app.slash(["/switch", "online"])
+    out = capsys.readouterr().out
+    assert "Switched to online mode" in out
+    assert "Groq API key" in out  # readiness warning
+
+
+def test_switch_to_online_with_key_is_silent(arch_system, isolated_home, monkeypatch, capsys):
+    cfgmod.save_config(cfgmod.Config(mode="basic", groq_api_key="gsk_x"))
+    app = _scripted_app(arch_system, [], monkeypatch)
+    app.slash(["/switch", "online"])
+    out = capsys.readouterr().out
+    assert "Switched to online mode" in out
+    assert "Groq API key" not in out  # ready -> no warning
+
+
+def test_switch_to_offline_without_model_warns(arch_system, isolated_home, monkeypatch, capsys):
+    cfgmod.save_config(cfgmod.Config(mode="basic"))
+    app = _scripted_app(arch_system, [], monkeypatch)
+    app.slash(["/switch", "offline"])
+    out = capsys.readouterr().out
+    assert "download-model" in out

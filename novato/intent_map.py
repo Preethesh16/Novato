@@ -121,6 +121,13 @@ _COMMUNICATION = {
 
 _DEVELOPMENT = {
     "code editor": ["neovim", "vscodium-bin", "code", "sublime-text-4"],
+    # Aliases so plain-English coding queries don't fall through to a literal
+    # repo search (which used to surface "qrencode" for the word "code").
+    "edit code": ["neovim", "vscodium-bin", "code", "sublime-text-4"],
+    "write code": ["neovim", "vscodium-bin", "code", "sublime-text-4"],
+    "code": ["neovim", "vscodium-bin", "code", "sublime-text-4"],
+    "coding": ["neovim", "vscodium-bin", "code", "sublime-text-4"],
+    "programming": ["neovim", "vscodium-bin", "code", "sublime-text-4"],
     "text editor": ["gedit", "kate", "mousepad", "geany"],
     "ide": ["jetbrains-toolbox", "code", "eclipse-java"],
     "vim": ["neovim", "vim", "gvim"],

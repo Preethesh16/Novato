@@ -30,6 +30,7 @@ from .detector import SystemInfo, detect_system
 from .presenter import Presenter
 
 _MAX_TRIES = 2  # gentle retries before we just reveal the answer and move on
+_QUIT_WORDS = {"q", "quit", "exit"}  # typed at any prompt to leave the tutorial
 
 
 @dataclass(frozen=True)
@@ -425,7 +426,13 @@ class Tutorial:
         if start >= len(lessons):
             start = 0  # already complete -> let them replay from the top
         for i in range(start, len(lessons)):
-            self._teach(lessons[i], i + 1, len(lessons), label)
+            if self._teach(lessons[i], i + 1, len(lessons), label):
+                # Learner quit mid-lesson: resume *at* this lesson next time.
+                self._save_progress(track_id, i)
+                self.ui.blank()
+                self.ui.success("Stopped the tutorial — your progress is saved. "
+                                "Run /learn to continue. 👋")
+                return False
             self._save_progress(track_id, i + 1)
             if i + 1 < len(lessons):
                 if not self.ui.ask_yes_no("Ready for the next lesson?", default_no=False):
@@ -434,7 +441,8 @@ class Tutorial:
                     return False
         return True
 
-    def _teach(self, lesson: Lesson, number: int, total: int, label: str) -> None:
+    def _teach(self, lesson: Lesson, number: int, total: int, label: str) -> bool:
+        """Present one lesson. Returns True if the learner asked to quit."""
         from rich.panel import Panel
         from rich.text import Text
 
@@ -456,35 +464,50 @@ class Tutorial:
         ))
 
         if lesson.quiz:
-            self._do_quiz(lesson)
-        elif lesson.expected:
-            self._do_practice(lesson)
+            return self._do_quiz(lesson)
+        if lesson.expected:
+            return self._do_practice(lesson)
         # concept-only lessons just display and move on.
+        return False
 
-    def _do_quiz(self, lesson: Lesson) -> None:
+    def _do_quiz(self, lesson: Lesson) -> bool:
+        """Run a comprehension check. Returns True if the learner asked to quit."""
         question, accepted = lesson.quiz
         for attempt in range(_MAX_TRIES + 1):
-            answer = (self._safe_input(f"\n{question}\n> ") or "").strip().lower()
+            raw = self._safe_input(f"\n{question}\n(or type 'q' to stop)\n> ")
+            if raw is None:
+                return True  # EOF / Ctrl+C -> leave the tutorial
+            answer = raw.strip().lower()
+            if answer in _QUIT_WORDS:
+                return True
             if accepted.lower() in answer:
                 self.ui.success("Exactly right. ✅")
-                return
+                return False
             if attempt < _MAX_TRIES:
                 self.ui.warn("Not quite — give it one more try.")
         self.ui.info(f"[dim]The answer is: {accepted}[/]")
+        return False
 
-    def _do_practice(self, lesson: Lesson) -> None:
+    def _do_practice(self, lesson: Lesson) -> bool:
+        """Run the try-it-yourself step. Returns True if the learner asked to quit."""
         for attempt in range(_MAX_TRIES + 1):
-            typed = (self._safe_input(f"\n{lesson.practice_prompt}\n$ ") or "").strip()
+            raw = self._safe_input(f"\n{lesson.practice_prompt}\n(or type 'q' to stop)\n$ ")
+            if raw is None:
+                return True  # EOF / Ctrl+C -> leave the tutorial
+            typed = raw.strip()
+            if typed.lower() in _QUIT_WORDS:
+                return True
             if _matches(lesson.expected, typed):
                 self.ui.success("That's it. ✅")
                 if lesson.run_demo:
                     self._show_demo(lesson.expected)
-                return
+                return False
             if attempt < _MAX_TRIES:
                 self.ui.warn(f"Close! The command to type is:  {lesson.expected}")
         self.ui.info(f"[dim]No worries — the command was:  {lesson.expected}[/]")
         if lesson.run_demo:
             self._show_demo(lesson.expected)
+        return False
 
     def _show_demo(self, command: str) -> None:
         """Run a vetted read-only command so the learner sees real output."""
