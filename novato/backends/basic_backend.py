@@ -129,6 +129,7 @@ class BasicBackend:
             return None
         best_key = None
         best_score = 0.0
+        best_overlap = 0
         for norm_key, original in self._normalized_keys.items():
             k_tokens = set(norm_key.split())
             if not k_tokens:
@@ -138,10 +139,19 @@ class BasicBackend:
                 continue
             # Jaccard-ish: reward covering the intent's words.
             score = overlap / len(k_tokens)
-            # Tie-break toward shorter, more specific intents.
-            if score > best_score or (score == best_score and best_key and
-                                      len(norm_key) < len(best_key)):
+            # On a score tie, prefer the intent that matches *more* of the
+            # query's words (more specific), e.g. "qr code" over bare "code"
+            # for the query "make a qr code"; only then fall back to the
+            # shorter key.
+            better = (
+                score > best_score
+                or (score == best_score and overlap > best_overlap)
+                or (score == best_score and overlap == best_overlap
+                    and best_key is not None and len(norm_key) < len(best_key))
+            )
+            if better:
                 best_score = score
+                best_overlap = overlap
                 best_key = original  # original (un-normalised) key
         if best_key is None:
             return None

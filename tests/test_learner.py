@@ -101,3 +101,49 @@ def test_stop_midway_saves_progress(isolated_home, monkeypatch):
     )
     assert t.run() == 0
     assert cfgmod.load_config().learn_progress.get("universal") == 1
+
+
+def test_typing_q_during_practice_quits_and_saves(isolated_home, monkeypatch):
+    """Typing 'q' at a practice prompt leaves the tutorial; lesson not marked done."""
+    lessons = (
+        learner.Lesson(slug="a", title="t", concept=("c",), command="pwd",
+                       command_note="n", practice_prompt="type pwd", expected="pwd"),
+        learner.Lesson(slug="b", title="t", concept=("c",), command="ls",
+                       command_note="n", practice_prompt="type ls", expected="ls"),
+    )
+    monkeypatch.setattr(learner, "UNIVERSAL", lessons)
+    answers = iter(["q"])  # quit at the very first practice prompt
+    t = learner.Tutorial(
+        system=_system(pm="zypper"),
+        presenter=Presenter(input_fn=lambda p: next(answers, "q")),
+        input_fn=lambda p: next(answers, "q"),
+        config=cfgmod.Config(),
+    )
+    assert t.run() == 0
+    # Quit before completing lesson 1 -> progress stays at 0, so /learn resumes there.
+    assert cfgmod.load_config().learn_progress.get("universal", 0) == 0
+
+
+def test_eof_during_practice_quits_without_flooding(isolated_home, monkeypatch):
+    """EOF / Ctrl+C must end the tutorial, not loop through every lesson."""
+    seen = {"prompts": 0}
+
+    def eof_input(prompt):
+        seen["prompts"] += 1
+        raise EOFError
+
+    lessons = tuple(
+        learner.Lesson(slug=str(i), title="t", concept=("c",), command="pwd",
+                       command_note="n", practice_prompt="type pwd", expected="pwd")
+        for i in range(5)
+    )
+    monkeypatch.setattr(learner, "UNIVERSAL", lessons)
+    t = learner.Tutorial(
+        system=_system(pm="zypper"),
+        presenter=Presenter(input_fn=eof_input),
+        input_fn=eof_input,
+        config=cfgmod.Config(),
+    )
+    assert t.run() == 0
+    # The first EOF ends it: we must not have re-prompted across all 5 lessons.
+    assert seen["prompts"] == 1

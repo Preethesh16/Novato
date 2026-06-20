@@ -194,7 +194,9 @@ def top_processes(
 ) -> list[ProcInfo]:
     """Return the heaviest processes by memory (default) or CPU."""
     key = "%mem" if sort_by == "mem" else "%cpu"
-    out = run(f"ps -eo pid=,comm=,{key.lstrip('%')}= --sort=-{key}")
+    # The format specifier must keep the leading '%' ('%mem'/'%cpu'); a bare
+    # 'mem'/'cpu' is rejected by ps with "unknown user-defined format specifier".
+    out = run(f"ps -eo pid=,comm=,{key}= --sort=-{key}")
     procs: list[ProcInfo] = []
     for line in out.splitlines():
         cols = line.split(None, 2)

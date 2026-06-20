@@ -33,12 +33,33 @@ def test_normalize_query_strips_filler_and_plurals():
     ("a private browser", "librewolf"),
     ("password manager", "keepassxc"),
     ("system monitor", "htop"),
+    # Coding queries must reach a code editor, not a literal "code" substring
+    # match like qrencode.
+    ("something to edit code", "neovim"),
+    ("edit code", "neovim"),
+    ("coding", "neovim"),
+    ("i want to code", "neovim"),
+    ("programming", "neovim"),
 ])
 def test_resolve_intent_finds_expected(query, expected_pkg):
     backend = BasicBackend()
     result = backend.resolve_intent(query)
     assert result.found
     assert expected_pkg in result.candidates
+
+
+@pytest.mark.parametrize("query,expected_pkg", [
+    ("qr code", "qrencode"),
+    ("make a qr code", "qrencode"),
+])
+def test_specific_multiword_intent_beats_generic_token(query, expected_pkg):
+    """On a score tie, the intent covering more query words wins.
+
+    Regression: adding a bare "code" intent must not hijack "qr code".
+    """
+    backend = BasicBackend()
+    result = backend.resolve_intent(query)
+    assert result.candidates[0] == expected_pkg
 
 
 def test_exact_match_scores_highest():
