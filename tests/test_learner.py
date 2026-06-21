@@ -29,11 +29,23 @@ def _system(pm="pacman", distro="arch"):
     ("apt", "ubuntu"),
     ("pacman", "arch"),
     ("dnf", "fedora"),
-    ("zypper", None),
+    ("zypper", "opensuse"),
     ("unknown", None),
 ])
 def test_package_for_system(pm, expected):
     assert learner.package_for_system(_system(pm=pm)) == expected
+
+
+@pytest.mark.parametrize("pkg_id", ["ubuntu", "arch", "fedora", "opensuse"])
+def test_every_distro_track_teaches_install_update_remove(pkg_id):
+    """Each distro track must cover the core trio: update, install, remove."""
+    _label, lessons = learner.PACKAGES[pkg_id]
+    text = " ".join(
+        " ".join(lesson.concept) + " " + lesson.command for lesson in lessons
+    ).lower()
+    assert "install" in text
+    assert "remove" in text
+    assert any(w in text for w in ("update", "upgrade", "-syu", "dup"))
 
 
 def test_matches_is_lenient_on_first_token():

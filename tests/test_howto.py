@@ -23,11 +23,32 @@ def test_bare_task_is_reference_only():
     assert a.runnable is False
 
 
-def test_dangerous_task_is_never_runnable():
+def test_bare_delete_with_no_name_is_reference_only():
+    # Without a concrete filename we only show `rm filename.txt`, never run it.
     a = howto.resolve("delete a file")
     assert a is not None
     assert a.dangerous is True
     assert a.runnable is False
+    assert a.placeholder is True
+
+
+def test_delete_with_real_filename_is_runnable():
+    # Given a concrete name, the delete becomes runnable (still gated by the
+    # safety layer and a default-No confirm in the caller). The file-vs-folder
+    # choice is settled at the app layer; here we just check the name survives.
+    a = howto.resolve("delete report.txt", threshold=0.2)
+    assert a is not None
+    assert a.command.endswith("report.txt")   # real name, extension preserved
+    assert a.dangerous is True
+    assert a.runnable is True
+    assert a.placeholder is False
+
+
+def test_extract_arg_preserves_extension_and_dedups():
+    # No double extension when the template already appends one.
+    a = howto.resolve("unzip report.zip", threshold=0.2)
+    assert a is not None
+    assert a.command == "unzip report.zip"
 
 
 def test_multi_argument_task_is_reference_only():

@@ -246,8 +246,13 @@ Novato has **absolute, non-negotiable** safety rules:
 
 - It **never** auto-runs anything — every command is shown and confirmed.
 - It **never** emits auto-confirm flags (`--noconfirm`, `-y`, `--yes`).
-- It **never** suggests destructive commands (`rm`, `dd`, `mkfs`, …) and refuses
-  to run them.
+- It **never** runs system-bricking commands (`dd`, `mkfs`, `fdisk`, fork bombs,
+  `rm -rf /`, wildcard or system-path deletes …) — these are shown for reference
+  only and refused outright.
+- **Deleting a file you named** (`novato "delete report.txt"`) *is* offered, but
+  only ever for **one specific, in-tree file/folder**, behind a loud warning and
+  a default-**No** confirmation. Anything broader (`rm *`, `rm ~`, absolute or
+  system paths, `rm -rf`) stays blocked.
 - It logs every executed command to `~/.novato/history.log`.
 
 See [DOCUMENTATION.md](DOCUMENTATION.md) for the full architecture and rules.

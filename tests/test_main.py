@@ -421,3 +421,33 @@ def test_remove_command_per_distro():
         app = App(system=sysinfo, config=cfgmod.Config(),
                   presenter=Presenter(), resolver=IntentResolver())
         assert app._remove_command("vlc") == expected
+
+
+# -- Guarded file deletion ----------------------------------------------------
+
+def test_delete_named_file_is_offered(arch_system, isolated_home, monkeypatch, capsys):
+    app = _scripted_app(arch_system, [], monkeypatch, dry_run=True)
+    app.run_query("delete report.txt")
+    out = capsys.readouterr().out
+    assert "rm report.txt" in out
+    assert "permanently deletes" in out
+
+
+def test_delete_routes_files_not_packages(arch_system, isolated_home, monkeypatch, capsys):
+    # A dotted target is a file to delete, not a package to uninstall.
+    app = _app_with_packages(arch_system, monkeypatch, ["firefox"])
+    app.dry_run = True
+    app.run_query("delete report.txt")
+    out = capsys.readouterr().out
+    assert "rm report.txt" in out
+    assert "nothing to remove" not in out
+
+
+def test_delete_system_path_is_shown_not_run(arch_system, isolated_home, monkeypatch, capsys):
+    app = _scripted_app(arch_system, ["y"], monkeypatch)  # would say yes...
+    monkeypatch.setattr(execmod, "_stream", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("must not execute a blocked rm")))
+    app.run_query("delete /etc/passwd")
+    out = capsys.readouterr().out
+    assert "rm /etc/passwd" in out          # shown for reference
+    # safety blocks it, so it was never offered for execution (no AssertionError)

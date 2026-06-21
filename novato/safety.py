@@ -112,15 +112,63 @@ def _program_name(tokens: list[str]) -> str:
     return tokens[i] if i < len(tokens) else ""
 
 
+# Shell metacharacters that must never appear in a delete target — a non-shell
+# executor treats them literally, but rejecting them keeps the offer clean.
+_SHELL_META = set(";|&$`<>()!\n\"'\\")
+
+
+def _safe_rm_target(tokens: list[str]) -> bool:
+    """True for ``rm`` of exactly one specific, in-tree file/folder by name.
+
+    This is the only delete we ever offer to run, and only after a default-No
+    confirmation. Everything risky stays blocked: wildcards, absolute/system
+    paths, the home directory, ``.``/``..``, multiple targets, or the ``-rf``
+    force combo (caught earlier by the pattern list).
+    """
+    # Drop a leading sudo/doas/env so we look at the real rm invocation.
+    i = 0
+    while i < len(tokens) and tokens[i] in ("sudo", "doas", "env"):
+        i += 1
+    args = tokens[i + 1:] if i < len(tokens) and tokens[i] == "rm" else None
+    if args is None:
+        return False
+
+    flags = [a for a in args if a.startswith("-")]
+    paths = [a for a in args if not a.startswith("-")]
+    # Only the gentle flags; -rf/-fr never reach here (the pattern list blocks
+    # them) but reject any unexpected flag to be safe.
+    for f in flags:
+        if set(f.lstrip("-")) - set("rfiv"):
+            return False
+    if len(paths) != 1:
+        return False  # exactly one named target — no mass deletes
+    target = paths[0]
+    if not target or target in (".", "..", "~", "/", "*"):
+        return False
+    if target.startswith(("/", "~", "-")):
+        return False                       # absolute, home-relative, or a flag
+    if target.startswith("..") or "/.." in target:
+        return False                       # climbing out of the tree
+    if any(c in _SHELL_META for c in target) or any(c in "*?[]" for c in target):
+        return False                       # metacharacters / globs
+    return True
+
+
 def is_destructive(command: str) -> tuple[bool, str]:
     """Return ``(True, reason)`` if the command is destructive, else (False, "")."""
-    tokens = _tokens(command)
-    prog = _program_name(tokens)
-    if prog in DESTRUCTIVE_COMMANDS:
-        return True, f"'{prog}' can permanently destroy data or partitions"
+    # Hard-blocked patterns first: rm -rf, rm /, dd of=/dev, fork bomb, ...
     for pat in DESTRUCTIVE_PATTERNS:
         if pat.search(command):
             return True, "matches a known dangerous pattern"
+    tokens = _tokens(command)
+    prog = _program_name(tokens)
+    if prog in DESTRUCTIVE_COMMANDS:
+        # Deleting one specific, in-tree file/folder by name is permitted (it
+        # still needs an explicit confirmation); every other destructive
+        # command — and every riskier rm — stays blocked.
+        if prog == "rm" and _safe_rm_target(tokens):
+            return False, ""
+        return True, f"'{prog}' can permanently destroy data or partitions"
     return False, ""
 
 

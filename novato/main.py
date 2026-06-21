@@ -225,10 +225,12 @@ class App:
     # -- Package removal: "uninstall firefox" -------------------------------
 
     def _try_remove(self, query: str) -> Optional[int]:
-        """Handle "remove/uninstall <package>". Returns an exit code, or None.
+        """Handle "remove/uninstall <package>" or "delete <file>". Or None.
 
-        File/folder deletion ("remove a file") is handled earlier by the how-to
-        layer, so any removal verb that reaches here targets a package.
+        A target that looks like a file on disk (it has an extension, or the
+        query says "file"/"folder") is treated as a deletion; otherwise it's a
+        package to uninstall. The generic "remove a file" with no name is caught
+        earlier by the how-to layer.
         """
         lower = query.lower()
         if not any(verb in lower for verb in _REMOVE_VERBS):
@@ -237,7 +239,32 @@ class App:
                  if t not in _REMOVE_NOISE]
         if not terms:
             return None
+        looks_like_file = (any("." in t for t in terms)
+                           or "/" in query
+                           or any(w in lower for w in
+                                  ("file", "folder", "directory")))
+        if looks_like_file:
+            return self._delete_path(query)
         return self._cmd_remove(terms)
+
+    def _delete_path(self, query: str) -> Optional[int]:
+        """Offer to delete a specific named file/folder (guarded + confirmed)."""
+        verbs = frozenset(w for verb in _REMOVE_VERBS for w in verb.split())
+        target = _howto._extract_arg(query, verbs)
+        if not target:
+            return None  # no concrete name -> fall through
+        recursive = any(w in query.lower() for w in ("folder", "directory"))
+        command = f"rm -r {target}" if recursive else f"rm {target}"
+        answer = _howto.HowtoAnswer(
+            command=command,
+            explanation=("delete a whole folder and its contents" if recursive
+                         else "delete a file"),
+            category="files",
+            note="There is no Recycle Bin — a deleted file is gone for good.",
+            runnable=True,
+            dangerous=True,
+        )
+        return self._present_howto(answer, offer_run=True, query=query)
 
     def _cmd_remove(self, terms: list[str]) -> int:
         """Find the installed package(s) matching ``terms`` and offer to remove."""
@@ -334,19 +361,26 @@ class App:
 
         self.ui.show_howto(answer)
 
-        if not offer_run or not answer.runnable or answer.dangerous:
+        if not offer_run or not answer.runnable:
             return 0
 
         command = answer.command
         verdict = _safety.validate(command)
         if not verdict.allowed:
-            return 0  # already shown for reference; safety won't run it
+            # Destructive form (e.g. a risky rm): shown for reference, never run.
+            return 0
         command = verdict.sanitized or command
 
         if self.dry_run:
             self.ui.info("[dim](dry-run: nothing was executed)[/]")
             return 0
         self.ui.blank()
+        # Deletions get a louder warning right before the (default-No) confirm.
+        if answer.dangerous:
+            self.ui.console.print(
+                f"[bold red]⚠ This permanently deletes [/][bold]{command}[/]"
+                f"[bold red] — there is no undo.[/]"
+            )
         if not self.ui.confirm(command):
             self.ui.info("Okay — didn't run it.")
             return 0
