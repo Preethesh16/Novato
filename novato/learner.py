@@ -219,6 +219,21 @@ _UBUNTU = (
               "'apt update' or 'apt upgrade'?", "update"),
     ),
     Lesson(
+        slug="apt-basics",
+        title="Installing and removing software",
+        concept=(
+            "The everyday apt commands:",
+            "  sudo apt install name   install a program",
+            "  sudo apt remove name    uninstall it",
+            "  apt search keyword      search the repositories",
+            "  apt show name           details about a package",
+        ),
+        command="sudo apt install vlc",
+        command_note="install a package from the Ubuntu/Debian repos",
+        quiz=("Quick check: which apt word REMOVES a program — install or remove?",
+              "remove"),
+    ),
+    Lesson(
         slug="apt-vs-snap",
         title="apt vs snap vs flatpak",
         concept=(
@@ -301,14 +316,28 @@ _FEDORA = (
         slug="dnf-update",
         title="Updating Fedora",
         concept=(
-            "Fedora uses dnf to manage software:",
+            "Fedora uses dnf to manage software. To update everything:",
             "  sudo dnf upgrade        install all available updates",
-            "  sudo dnf install name   install a package",
-            "  sudo dnf remove name    remove a package",
+            "Run it regularly to stay secure and current.",
         ),
         command="sudo dnf upgrade",
         command_note="install all available updates",
-        quiz=("Quick check: which dnf word INSTALLS a package?", "install"),
+        quiz=("Quick check: which dnf command installs all available updates?",
+              "upgrade"),
+    ),
+    Lesson(
+        slug="dnf-basics",
+        title="Installing and removing software",
+        concept=(
+            "The everyday dnf commands:",
+            "  sudo dnf install name   install a program",
+            "  sudo dnf remove name    uninstall it",
+            "  dnf search keyword      search the repositories",
+            "  dnf info name           details about a package",
+        ),
+        command="sudo dnf install vlc",
+        command_note="install a package from the Fedora repos",
+        quiz=("Quick check: which dnf word REMOVES a program?", "remove"),
     ),
     Lesson(
         slug="selinux",
@@ -326,11 +355,45 @@ _FEDORA = (
     ),
 )
 
+_OPENSUSE = (
+    Lesson(
+        slug="zypper-update",
+        title="Updating openSUSE",
+        concept=(
+            "openSUSE uses zypper to manage software:",
+            "  sudo zypper refresh     refresh the repository list",
+            "  sudo zypper update      install available updates",
+            "On Tumbleweed (rolling release), use 'sudo zypper dup' instead.",
+        ),
+        command="sudo zypper update",
+        command_note="install all available updates",
+        quiz=("Quick check: which zypper word installs available updates — "
+              "'update' or 'refresh'?", "update"),
+    ),
+    Lesson(
+        slug="zypper-basics",
+        title="Installing and removing software",
+        concept=(
+            "The everyday zypper commands:",
+            "  sudo zypper install name   install a program",
+            "  sudo zypper remove name    uninstall it",
+            "  zypper search keyword      search the repositories",
+            "  zypper info name           details about a package",
+        ),
+        command="sudo zypper install vlc",
+        command_note="install a package from the openSUSE repos",
+        quiz=("Quick check: which zypper word INSTALLS a program?", "install"),
+    ),
+)
+
 # package id -> (label, lessons). Chosen by detected distro / package manager.
+# Every track teaches the same core trio — update the system, install a package,
+# remove a package (plus search) — in that distro's own commands.
 PACKAGES: dict[str, tuple[str, tuple[Lesson, ...]]] = {
     "ubuntu": ("Ubuntu & Debian essentials", _UBUNTU),
     "arch": ("Arch Linux essentials", _ARCH),
     "fedora": ("Fedora essentials", _FEDORA),
+    "opensuse": ("openSUSE essentials", _OPENSUSE),
 }
 
 
@@ -343,6 +406,8 @@ def package_for_system(system: SystemInfo) -> Optional[str]:
         return "arch"
     if pm == "dnf":
         return "fedora"
+    if pm == "zypper":
+        return "opensuse"
     return None
 
 

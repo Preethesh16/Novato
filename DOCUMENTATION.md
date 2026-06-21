@@ -184,8 +184,11 @@ These are **absolute and non-negotiable**, enforced primarily by
 1. Never auto-execute. Always show the command, always ask `y/N`.
 2. Never emit `--noconfirm`, `-y`, or `--yes` — they are stripped from any
    generated command (`safety.sanitize`).
-3. Never suggest or run `rm`, `dd`, `mkfs`, `fdisk`, … — these are *blocked*
-   (`safety.validate` returns `Risk.BLOCKED`).
+3. Never run system-bricking commands — `dd`, `mkfs`, `fdisk`, fork bombs,
+   `rm -rf`, wildcard/absolute/system-path deletes — these are *blocked*
+   (`safety.validate` returns `Risk.BLOCKED`). A plain `rm` of **one specific,
+   in-tree file/folder by name** is the sole exception: it is allowed but still
+   requires the explicit default-No confirmation (`safety._safe_rm_target`).
 4. Never send actual commands to Groq — only the intent/query.
 5. Never send file paths, usernames, or system info to any online service.
 6. Always log every executed command to `~/.novato/history.log`.

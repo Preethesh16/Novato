@@ -85,3 +85,16 @@ def test_dd_to_regular_file_not_blocked():
     verdict = safety.validate("dd if=in.img of=out.img")
     # 'dd' itself is in DESTRUCTIVE_COMMANDS, so it is blocked conservatively.
     assert verdict.risk is Risk.BLOCKED
+
+
+def test_guarded_rm_of_named_file_is_allowed():
+    # Deleting one specific, in-tree file/folder by name is permitted (the
+    # caller still requires an explicit confirmation).
+    for cmd in ("rm report.txt", "rm -r myfolder", "rm notes.md", "rm -i old.log"):
+        assert safety.validate(cmd).allowed, cmd
+
+
+def test_dangerous_rm_forms_stay_blocked():
+    for cmd in ("rm -rf /", "rm -rf myfolder", "rm *", "rm ~", "rm /etc/passwd",
+                "rm ../../thing", "rm a b c", "rm .", 'rm "a; rm -rf /"'):
+        assert not safety.validate(cmd).allowed, cmd

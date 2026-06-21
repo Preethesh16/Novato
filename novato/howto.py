@@ -134,13 +134,13 @@ _ENTRIES: tuple[HowtoEntry, ...] = (
                "mv thing.txt destination/", "move a file or folder elsewhere",
                "files", default_arg="x"),
     HowtoEntry(("delete a file", "remove a file", "delete file", "remove file"),
-               "rm filename.txt", "delete a file", "files",
-               dangerous=True,
+               "rm {arg}", "delete a file", "files",
+               dangerous=True, default_arg="filename.txt",
                note="There is no Recycle Bin — a deleted file is gone for good."),
     HowtoEntry(("delete a folder", "remove a folder", "delete directory",
                 "remove a directory"),
-               "rm -r foldername", "delete a whole folder and its contents",
-               "files", dangerous=True,
+               "rm -r {arg}", "delete a whole folder and its contents",
+               "files", dangerous=True, default_arg="foldername",
                note="There is no Recycle Bin — double-check the name first."),
 
     # -- Archives -----------------------------------------------------------
@@ -283,15 +283,26 @@ def _score(query_tokens: frozenset[str], key: str, key_tokens: frozenset[str]) -
 def _extract_arg(query: str, key_tokens: frozenset[str]) -> Optional[str]:
     """Pull a concrete argument (a filename/folder) out of the user's phrasing.
 
-    Returns the first leftover token that isn't part of the matched key and
-    isn't a filler word — e.g. "unzip messi file" -> "messi". Returns ``None``
-    when the user gave only the bare task ("unzip the file").
+    Works on the *raw* tokens (not the normalised ones) so an extension survives
+    — "delete report.txt" -> "report.txt", not "report". Prefers a token that
+    looks like a filename (has an extension) over a bare word, so "remove my
+    report.txt" picks "report.txt". Returns ``None`` for a bare task ("unzip the
+    file").
     """
-    for tok in _normalize(query):
-        if tok in key_tokens or tok in _ARG_STOP:
+    candidates: list[str] = []
+    for raw in query.split():
+        # Compare on a normalised form, but keep the original token (with its
+        # dots, case, dashes) as the actual argument.
+        norm = re.sub(r"[^a-z0-9]", "", raw.lower())
+        if not norm or norm in key_tokens or norm in _ARG_STOP:
             continue
-        return tok
-    return None
+        candidates.append(raw.strip("\"'"))
+    if not candidates:
+        return None
+    for tok in candidates:
+        if "." in tok.strip("."):          # looks like name.ext
+            return tok
+    return candidates[0]
 
 
 def resolve(query: str, *, threshold: float = 0.55) -> Optional[HowtoAnswer]:
@@ -325,17 +336,22 @@ def resolve(query: str, *, threshold: float = 0.55) -> Optional[HowtoAnswer]:
 def _build_answer(entry: HowtoEntry, key: str, score: float, query: str) -> HowtoAnswer:
     """Fill an entry's template with any extracted argument and a runnable flag."""
     command = entry.template
-    runnable = not entry.dangerous
+    runnable = True
     placeholder = False
 
     if "{arg}" in command:
         key_tokens = frozenset(_normalize(key))
         arg = _extract_arg(query, key_tokens)
         if arg:
+            # Avoid "report.zip.zip": if the template appends a literal extension
+            # right after {arg}, drop any extension the user already typed.
+            if "{arg}." in command:
+                arg = arg.split(".")[0]
             command = command.format(arg=arg)
         else:
             # No concrete argument given: show a placeholder for reference only,
-            # never offer to run a command full of made-up names.
+            # never offer to run a command full of made-up names. This is what
+            # keeps a bare "delete a file" from offering to run `rm`.
             command = command.format(arg=entry.default_arg)
             runnable = False
             placeholder = True
