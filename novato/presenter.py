@@ -211,7 +211,7 @@ class Presenter:
         if answer.dangerous:
             self.console.print("   [bold red]⚠ This permanently deletes data — "
                                "there is no undo.[/]")
-        elif not answer.runnable:
+        elif not answer.runnable and answer.placeholder:
             self.console.print("   [dim]Replace the example name(s) above with your "
                                "own, then run it.[/]")
 

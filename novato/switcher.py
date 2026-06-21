@@ -18,7 +18,9 @@ MODE_DESCRIPTIONS = {
     "both":    "Groq online + llamafile fallback — best experience.",
 }
 
-RECOMMENDED_MODE = "both"
+# Online is the recommended default: installing or updating packages needs the
+# internet anyway, and Groq needs no multi-GB model download to get going.
+RECOMMENDED_MODE = "online"
 
 
 class ModeSwitchError(ValueError):
