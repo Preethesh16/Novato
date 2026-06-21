@@ -183,7 +183,10 @@ def sanitize(command: str) -> str:
     flags = set(AUTO_CONFIRM_FLAGS)
     flags.update(_PM_CONFIRM_FLAGS.get(prog, ()))
     cleaned = [t for t in tokens if t not in flags]
-    return " ".join(cleaned)
+    if cleaned == tokens:
+        return command  # nothing stripped -> preserve the original text verbatim
+    # Re-quote so a token with spaces ("blah blah.txt") survives the round-trip.
+    return shlex.join(cleaned)
 
 
 def has_auto_confirm(command: str) -> bool:

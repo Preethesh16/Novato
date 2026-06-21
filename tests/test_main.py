@@ -423,9 +423,11 @@ def test_remove_command_per_distro():
         assert app._remove_command("vlc") == expected
 
 
-# -- Guarded file deletion ----------------------------------------------------
+# -- Guarded file deletion (scans the real current directory) -----------------
 
-def test_delete_named_file_is_offered(arch_system, isolated_home, monkeypatch, capsys):
+def test_delete_named_file_is_offered(arch_system, isolated_home, monkeypatch, tmp_path, capsys):
+    (tmp_path / "report.txt").write_text("x")
+    monkeypatch.chdir(tmp_path)
     app = _scripted_app(arch_system, [], monkeypatch, dry_run=True)
     app.run_query("delete report.txt")
     out = capsys.readouterr().out
@@ -433,21 +435,55 @@ def test_delete_named_file_is_offered(arch_system, isolated_home, monkeypatch, c
     assert "permanently deletes" in out
 
 
-def test_delete_routes_files_not_packages(arch_system, isolated_home, monkeypatch, capsys):
-    # A dotted target is a file to delete, not a package to uninstall.
-    app = _app_with_packages(arch_system, monkeypatch, ["firefox"])
-    app.dry_run = True
-    app.run_query("delete report.txt")
+def test_delete_handles_spaces_in_filename(arch_system, isolated_home, monkeypatch, tmp_path, capsys):
+    # The real bug: a name with spaces must resolve to the actual file, quoted.
+    (tmp_path / "blah blah.txt").write_text("x")
+    monkeypatch.chdir(tmp_path)
+    app = _scripted_app(arch_system, [], monkeypatch, dry_run=True)
+    app.run_query("delete blah blah.txt")
     out = capsys.readouterr().out
-    assert "rm report.txt" in out
-    assert "nothing to remove" not in out
+    assert "rm 'blah blah.txt'" in out
 
 
-def test_delete_system_path_is_shown_not_run(arch_system, isolated_home, monkeypatch, capsys):
-    app = _scripted_app(arch_system, ["y"], monkeypatch)  # would say yes...
-    monkeypatch.setattr(execmod, "_stream", lambda *a, **k: (_ for _ in ()).throw(
-        AssertionError("must not execute a blocked rm")))
+def test_delete_typo_still_finds_file(arch_system, isolated_home, monkeypatch, tmp_path, capsys):
+    (tmp_path / "notes.md").write_text("x")
+    monkeypatch.chdir(tmp_path)
+    app = _scripted_app(arch_system, [], monkeypatch, dry_run=True)
+    app.run_query("delet notes.md")  # typo'd verb
+    out = capsys.readouterr().out
+    assert "rm notes.md" in out
+
+
+def test_delete_folder_uses_recursive(arch_system, isolated_home, monkeypatch, tmp_path, capsys):
+    (tmp_path / "hello").mkdir()
+    monkeypatch.chdir(tmp_path)
+    app = _scripted_app(arch_system, [], monkeypatch, dry_run=True)
+    app.run_query("delete hello folder")
+    out = capsys.readouterr().out
+    assert "rm -r hello" in out
+
+
+def test_delete_nonexistent_says_not_found(arch_system, isolated_home, monkeypatch, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)  # empty directory
+    app = _scripted_app(arch_system, [], monkeypatch, dry_run=True)
+    app.run_query("delete ghost.txt")
+    out = capsys.readouterr().out
+    assert "don't see a file or folder" in out
+
+
+def test_delete_absolute_path_is_never_offered(arch_system, isolated_home, monkeypatch, tmp_path, capsys):
+    # A system path isn't in the current dir, so it's never matched or offered.
+    monkeypatch.chdir(tmp_path)
+    app = _scripted_app(arch_system, [], monkeypatch, dry_run=True)
     app.run_query("delete /etc/passwd")
     out = capsys.readouterr().out
-    assert "rm /etc/passwd" in out          # shown for reference
-    # safety blocks it, so it was never offered for execution (no AssertionError)
+    assert "rm /etc/passwd" not in out
+
+
+def test_actual_deletion_removes_the_real_file(arch_system, isolated_home, monkeypatch, tmp_path):
+    target = tmp_path / "throwaway.txt"
+    target.write_text("data")
+    monkeypatch.chdir(tmp_path)
+    app = _scripted_app(arch_system, ["y"], monkeypatch)  # confirm the delete
+    app.run_query("delete throwaway.txt")
+    assert not target.exists()
