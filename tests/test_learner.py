@@ -52,7 +52,8 @@ def test_quiz_accepts_correct_answer_and_advances(isolated_home, monkeypatch):
         quiz=("question?", "yes"),
     )
     monkeypatch.setattr(learner, "UNIVERSAL", (lesson,))
-    answers = iter(["yes"])  # quiz answer; single lesson -> no "next?" prompt
+    # "" = start from the top at the lesson-index chooser, then the quiz answer.
+    answers = iter(["", "yes"])  # single lesson -> no "next?" prompt
     t = learner.Tutorial(
         system=_system(pm="zypper"),  # no distro package -> finishes after track
         presenter=Presenter(input_fn=lambda p: next(answers, "n")),
@@ -91,8 +92,8 @@ def test_stop_midway_saves_progress(isolated_home, monkeypatch):
                        command_note="n", quiz=("q?", "yes")),
     )
     monkeypatch.setattr(learner, "UNIVERSAL", lessons)
-    # Answer lesson 1 correctly, then decline "Ready for the next lesson?".
-    answers = iter(["yes", "n"])
+    # Start from the top, answer lesson 1, then decline "Ready for the next lesson?".
+    answers = iter(["", "yes", "n"])
     t = learner.Tutorial(
         system=_system(pm="zypper"),
         presenter=Presenter(input_fn=lambda p: next(answers, "n")),
@@ -112,7 +113,7 @@ def test_typing_q_during_practice_quits_and_saves(isolated_home, monkeypatch):
                        command_note="n", practice_prompt="type ls", expected="ls"),
     )
     monkeypatch.setattr(learner, "UNIVERSAL", lessons)
-    answers = iter(["q"])  # quit at the very first practice prompt
+    answers = iter(["", "q"])  # start from the top, then quit at the first practice
     t = learner.Tutorial(
         system=_system(pm="zypper"),
         presenter=Presenter(input_fn=lambda p: next(answers, "q")),
@@ -128,9 +129,11 @@ def test_eof_during_practice_quits_without_flooding(isolated_home, monkeypatch):
     """EOF / Ctrl+C must end the tutorial, not loop through every lesson."""
     seen = {"prompts": 0}
 
-    def eof_input(prompt):
+    def feed(prompt):
         seen["prompts"] += 1
-        raise EOFError
+        if seen["prompts"] == 1:
+            return ""  # the lesson-index chooser: start from the top
+        raise EOFError  # then EOF at the first practice prompt
 
     lessons = tuple(
         learner.Lesson(slug=str(i), title="t", concept=("c",), command="pwd",
@@ -140,10 +143,55 @@ def test_eof_during_practice_quits_without_flooding(isolated_home, monkeypatch):
     monkeypatch.setattr(learner, "UNIVERSAL", lessons)
     t = learner.Tutorial(
         system=_system(pm="zypper"),
-        presenter=Presenter(input_fn=eof_input),
-        input_fn=eof_input,
+        presenter=Presenter(input_fn=feed),
+        input_fn=feed,
         config=cfgmod.Config(),
     )
     assert t.run() == 0
-    # The first EOF ends it: we must not have re-prompted across all 5 lessons.
-    assert seen["prompts"] == 1
+    # chooser (1) + first practice prompt that EOFs (2); must not flood all lessons.
+    assert seen["prompts"] == 2
+
+
+def test_choose_start_jumps_to_lesson_number(isolated_home, monkeypatch):
+    """Typing a lesson number starts the track there, overriding saved progress."""
+    lessons = tuple(
+        learner.Lesson(slug=str(i), title=f"L{i}", concept=("c",), command="pwd",
+                       command_note="n", quiz=("q?", "yes"))
+        for i in range(5)
+    )
+    monkeypatch.setattr(learner, "UNIVERSAL", lessons)
+    # Start at lesson 3, answer it, then decline to continue.
+    answers = iter(["3", "yes", "n"])
+    t = learner.Tutorial(
+        system=_system(pm="zypper"),
+        presenter=Presenter(input_fn=lambda p: next(answers, "n")),
+        input_fn=lambda p: next(answers, "n"),
+        config=cfgmod.Config(),
+    )
+    assert t.run() == 0
+    # Completed lesson 3 (index 2) -> progress saved as 3.
+    assert cfgmod.load_config().learn_progress.get("universal") == 3
+
+
+def test_choose_start_skip_jumps_to_distro_track(isolated_home, monkeypatch):
+    """'skip' bypasses the universal basics and goes to the system-specific track."""
+    universal = tuple(
+        learner.Lesson(slug=f"u{i}", title=f"U{i}", concept=("c",), command="pwd",
+                       command_note="n", quiz=("q?", "yes"))
+        for i in range(3)
+    )
+    monkeypatch.setattr(learner, "UNIVERSAL", universal)
+    # 'skip' -> distro track, then 'yes' to start it, answer its first lesson,
+    # decline the rest.
+    answers = iter(["skip", "yes", "yes", "n"])
+    t = learner.Tutorial(
+        system=_system(pm="pacman", distro="arch"),  # has a distro track
+        presenter=Presenter(input_fn=lambda p: next(answers, "n")),
+        input_fn=lambda p: next(answers, "n"),
+        config=cfgmod.Config(),
+    )
+    assert t.run() == 0
+    # Universal basics were skipped -> no universal progress recorded.
+    assert cfgmod.load_config().learn_progress.get("universal", 0) == 0
+    # But the distro (arch) track advanced.
+    assert cfgmod.load_config().learn_progress.get("arch", 0) >= 1

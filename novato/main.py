@@ -59,6 +59,19 @@ _EXCLUDE_MARKERS = (
     "skipping", "skip", "besides",
 )
 
+# Verbs that signal the user wants to *uninstall* a package, not install one.
+# "remove a file"/"delete a folder" are caught earlier by the how-to layer, so
+# by the time we check these the target is a package name.
+_REMOVE_VERBS = ("uninstall", "remove", "get rid of", "getting rid of",
+                 "purge", "delete")
+# Tokens to strip when isolating the package name from a removal request.
+_REMOVE_NOISE = frozenset({
+    "uninstall", "remove", "removing", "get", "getting", "rid", "of", "purge",
+    "delete", "deleting", "the", "this", "that", "my", "please", "app",
+    "application", "program", "package", "software",
+    "file", "files", "folder", "folders", "directory", "directories",
+})
+
 # Words that carry no package-matching signal, so they're dropped when turning an
 # exclusion clause into keywords to match against installed packages.
 _EXCLUDE_NOISE = frozenset({
@@ -109,6 +122,12 @@ class App:
         handled = self._try_task(query)
         if handled is not None:
             return handled
+
+        # "remove firefox" / "uninstall vlc" -> the removal flow, not a search
+        # that would offer to *install* the very thing they want gone.
+        removal = self._try_remove(query)
+        if removal is not None:
+            return removal
 
         if not self.system.supported:
             self.ui.error(
@@ -202,6 +221,101 @@ class App:
         if answer is not None:
             return self._present_howto(answer, offer_run=True, query=query)
         return None
+
+    # -- Package removal: "uninstall firefox" -------------------------------
+
+    def _try_remove(self, query: str) -> Optional[int]:
+        """Handle "remove/uninstall <package>". Returns an exit code, or None.
+
+        File/folder deletion ("remove a file") is handled earlier by the how-to
+        layer, so any removal verb that reaches here targets a package.
+        """
+        lower = query.lower()
+        if not any(verb in lower for verb in _REMOVE_VERBS):
+            return None
+        terms = [t for t in self._meaningful_terms(query)
+                 if t not in _REMOVE_NOISE]
+        if not terms:
+            return None
+        return self._cmd_remove(terms)
+
+    def _cmd_remove(self, terms: list[str]) -> int:
+        """Find the installed package(s) matching ``terms`` and offer to remove."""
+        pm = self.system.package_manager
+        installed = _installed.installed_versions(pm)
+
+        # Prefer an exact package-name match ("firefox"); otherwise any installed
+        # package whose name contains every term ("visual studio code" ->
+        # visual-studio-code-bin).
+        joined = "-".join(terms)
+        squashed = "".join(terms)
+        exact = [n for n in installed if n.lower() in (joined, squashed)]
+        if exact:
+            matches = sorted(exact)
+        else:
+            matches = sorted(n for n in installed
+                             if all(t in n.lower() for t in terms))
+
+        if not matches:
+            self.ui.blank()
+            self.ui.info(
+                f"\"{' '.join(terms)}\" doesn't look installed, so there's "
+                "nothing to remove."
+            )
+            return 0
+
+        if len(matches) == 1:
+            package = matches[0]
+        else:
+            self.ui.blank()
+            self.ui.info("A few installed packages match — which one?")
+            for i, name in enumerate(matches, 1):
+                self.ui.info(f"  [bold cyan]{i}[/] {name}  ({installed[name]})")
+            idx = self.ui.prompt_choice(len(matches))
+            if idx is None:
+                self.ui.info("Okay — nothing removed.")
+                return 0
+            package = matches[idx]
+
+        command = self._remove_command(package)
+        verdict = _safety.validate(command)
+        if not verdict.allowed:
+            self.ui.error(verdict.reason)
+            return 2
+        command = verdict.sanitized or command
+
+        self.ui.blank()
+        self.ui.info(f"[bold]{package}[/] is installed (version {installed[package]}).")
+        self.ui.show_command(command)
+
+        if self.dry_run:
+            self.ui.info("[dim](dry-run: nothing was removed)[/]")
+            return 0
+        if not self.ui.confirm(command):
+            _logger.log_event(_logger.EVENT_DECLINE, command)
+            self.ui.info("Okay — left it installed.")
+            return 0
+        self.ui.blank()
+        self.ui.status_line(self.config.mode, f"Removing {package}...")
+        result = execute(command, on_line=lambda ln: self.ui.console.print(ln, markup=False))
+        if result.succeeded:
+            self.ui.success(f"Removed {package}.")
+            return 0
+        if result.exit_code >= 128:
+            self.ui.info("Cancelled — nothing was changed.")
+            return result.exit_code
+        self.ui.error(f"Removal exited with code {result.exit_code}.")
+        return result.exit_code
+
+    def _remove_command(self, package: str) -> str:
+        """The right 'uninstall this package' command for the current distro."""
+        pm = self.system.package_manager
+        return {
+            "pacman": f"sudo pacman -Rs {package}",
+            "apt": f"sudo apt remove {package}",
+            "dnf": f"sudo dnf remove {package}",
+            "zypper": f"sudo zypper remove {package}",
+        }.get(pm, f"sudo {pm} remove {package}")
 
     def _present_howto(self, answer, *, offer_run: bool, query: str = "") -> int:
         """Show a how-to answer and, when safe, offer to run it."""
@@ -666,6 +780,7 @@ class App:
             "",
             "  INSTALL & DO THINGS",
             '  novato "what you want"                install software by describing it',
+            '  novato "remove firefox"               uninstall a package you no longer want',
             '  novato "unzip this file"              do a terminal task in plain English',
             '  /do "rename a file"                   same, as an explicit command',
             '  /man "extract a tar file"             show the one command for a task',

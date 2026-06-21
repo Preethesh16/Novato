@@ -368,3 +368,56 @@ def test_update_exclusions_resolves_phrases(arch_system, isolated_home, monkeypa
     # Two products, comma/or separated, each matched as a whole phrase.
     ignore = app._update_exclusions("update but not android studio or visual studio code")
     assert ignore == ["android-studio", "visual-studio-code-bin"]
+
+
+# -- Package removal: "uninstall firefox" -------------------------------------
+
+def test_remove_offers_uninstall_not_install(arch_system, isolated_home, monkeypatch, capsys):
+    app = _app_with_packages(arch_system, monkeypatch, ["firefox", "vlc"])
+    monkeypatch.setattr(execmod, "_stream", lambda *a, **k: 0)
+    app.dry_run = True
+    app.run_query("remove firefox")
+    out = capsys.readouterr().out
+    assert "sudo pacman -Rs firefox" in out
+    assert "pacman -S firefox" not in out  # must NOT offer to install
+
+
+def test_remove_not_installed_says_so(arch_system, isolated_home, monkeypatch, capsys):
+    app = _app_with_packages(arch_system, monkeypatch, ["firefox"])
+    app.dry_run = True
+    app.run_query("uninstall photoshop")
+    out = capsys.readouterr().out
+    assert "nothing to remove" in out
+    assert "-Rs" not in out
+
+
+def test_remove_phrase_matches_real_package(arch_system, isolated_home, monkeypatch, capsys):
+    app = _app_with_packages(arch_system, monkeypatch,
+                            ["visual-studio-code-bin", "firefox"])
+    app.dry_run = True
+    app.run_query("uninstall visual studio code")
+    out = capsys.readouterr().out
+    assert "sudo pacman -Rs visual-studio-code-bin" in out
+
+
+def test_remove_a_file_is_still_file_deletion(arch_system, isolated_home, monkeypatch, capsys):
+    """'remove a file' is a how-to (rm), not package removal."""
+    app = _app_with_packages(arch_system, monkeypatch, ["firefox"])
+    app.dry_run = True
+    app.run_query("remove a file")
+    out = capsys.readouterr().out
+    assert "rm" in out
+    assert "-Rs" not in out
+
+
+def test_remove_command_per_distro():
+    cases = {"pacman": "sudo pacman -Rs vlc", "apt": "sudo apt remove vlc",
+             "dnf": "sudo dnf remove vlc", "zypper": "sudo zypper remove vlc"}
+    for pm, expected in cases.items():
+        sysinfo = SystemInfo(
+            distro_id="x", distro_name="X", distro_version="", package_manager=pm,
+            install_cmd="", search_cmd="", supports_aur=False, aur_helper=None,
+            shell="bash", supported=True)
+        app = App(system=sysinfo, config=cfgmod.Config(),
+                  presenter=Presenter(), resolver=IntentResolver())
+        assert app._remove_command("vlc") == expected
