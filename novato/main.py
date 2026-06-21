@@ -48,6 +48,28 @@ _DISK_FULL_HINTS = (
     "what's taking", "what is taking", "low on space", "storage full",
 )
 
+# Phrases that introduce an "...except these" clause in a system-update request,
+# e.g. "update everything without touching android studio". Longest first so a
+# two-word marker is matched before a substring of it.
+_EXCLUDE_MARKERS = (
+    "without updating", "without upgrading", "without touching", "apart from",
+    "other than", "but not", "leave out", "leaving out", "don't update",
+    "dont update", "do not update", "don't upgrade", "dont upgrade",
+    "not update", "without", "except", "excluding", "ignoring", "ignore",
+    "skipping", "skip", "besides",
+)
+
+# Words that carry no package-matching signal, so they're dropped when turning an
+# exclusion clause into keywords to match against installed packages.
+_EXCLUDE_NOISE = frozenset({
+    "updating", "update", "upgrading", "upgrade", "updates", "any", "all",
+    "other", "others", "related", "stuff", "things", "thing", "dev",
+    "anything", "everything", "package", "packages", "app", "apps",
+    "application", "applications", "system", "please", "also", "the", "and",
+    "for", "with", "that", "this", "them", "those", "these", "are", "from",
+    "touching", "touch", "keep", "keeping",
+})
+
 
 class App:
     """Holds shared state (system, config, UI) and implements the commands."""
@@ -178,14 +200,23 @@ class App:
         # keeps genuine package requests ("video editor") out of this path.
         answer = _howto.resolve(query, threshold=0.72)
         if answer is not None:
-            return self._present_howto(answer, offer_run=True)
+            return self._present_howto(answer, offer_run=True, query=query)
         return None
 
-    def _present_howto(self, answer, *, offer_run: bool) -> int:
+    def _present_howto(self, answer, *, offer_run: bool, query: str = "") -> int:
         """Show a how-to answer and, when safe, offer to run it."""
         if answer.command == _howto.SYNC_SENTINEL:
-            answer.command = self._system_update_command()
+            ignore = self._update_exclusions(query)
+            answer.command = self._system_update_command(ignore=ignore)
             answer.runnable = False  # whole-system updates: show, let them run it
+            if ignore:
+                answer.note = ("Skipping: " + ", ".join(ignore)
+                               + " — they won't be upgraded.")
+            elif self._asked_to_exclude(query):
+                # They asked to exclude something, but nothing installed matched.
+                answer.note = ("Nothing your package manager installed matches "
+                               "what you asked to skip, so a normal update won't "
+                               "touch it anyway.")
 
         self.ui.show_howto(answer)
 
@@ -208,15 +239,90 @@ class App:
         result = execute(command, on_line=lambda ln: self.ui.console.print(ln, markup=False))
         return result.exit_code if result.executed else 0
 
-    def _system_update_command(self) -> str:
-        """The right 'update everything' command for this distro (for display)."""
+    def _system_update_command(self, *, ignore: Optional[list[str]] = None) -> str:
+        """The right 'update everything' command for this distro (for display).
+
+        When ``ignore`` lists packages, build the distro-specific 'hold these
+        back' variant so the user can update the rest of the system while
+        leaving named packages (e.g. ``android-studio``) at their current
+        version.
+        """
         pm = self.system.package_manager
-        return {
-            "pacman": "sudo pacman -Syu",
-            "apt": "sudo apt update && sudo apt upgrade",
-            "dnf": "sudo dnf upgrade",
-            "zypper": "sudo zypper update",
-        }.get(pm, self.system.sync_cmd or "your package manager's update command")
+        ig = ignore or []
+        if pm == "pacman":
+            base = "sudo pacman -Syu"
+            return base + (" --ignore=" + ",".join(ig) if ig else "")
+        if pm == "apt":
+            if ig:
+                held = " ".join(ig)
+                return (f"sudo apt-mark hold {held} && sudo apt update && "
+                        f"sudo apt upgrade && sudo apt-mark unhold {held}")
+            return "sudo apt update && sudo apt upgrade"
+        if pm == "dnf":
+            base = "sudo dnf upgrade"
+            return base + (" --exclude=" + ",".join(ig) if ig else "")
+        if pm == "zypper":
+            if ig:
+                locks = " ".join(ig)
+                return (f"sudo zypper addlock {locks} && sudo zypper update && "
+                        f"sudo zypper removelock {locks}")
+            return "sudo zypper update"
+        return self.system.sync_cmd or "your package manager's update command"
+
+    def _asked_to_exclude(self, query: str) -> bool:
+        """True if the query contains an 'except <something>' clause."""
+        lower = query.lower()
+        return any(marker in lower for marker in _EXCLUDE_MARKERS)
+
+    def _exclude_phrases(self, query: str) -> list[list[str]]:
+        """Break an update query's exclusion clause into product phrases.
+
+        Each "or"/"and"/comma-separated chunk becomes one phrase (a list of its
+        significant tokens), so "android studio or chrome" -> [['android',
+        'studio'], ['chrome']]. A package later has to match *every* token of a
+        phrase, which keeps "android studio" from also catching
+        "visual-studio-code" off the lone word "studio". Returns [] when there's
+        no exclusion clause.
+        """
+        import re
+
+        lower = query.lower()
+        cut = -1
+        for marker in _EXCLUDE_MARKERS:
+            pos = lower.find(marker)
+            if pos != -1:
+                end = pos + len(marker)
+                cut = end if cut == -1 else min(cut, end)
+        if cut == -1:
+            return []
+
+        phrases: list[list[str]] = []
+        for chunk in re.split(r"\bor\b|\band\b|\bplus\b|,", lower[cut:]):
+            chunk = re.sub(r"[^a-z0-9\s]", " ", chunk)
+            toks = [w for w in chunk.split()
+                    if len(w) >= 3 and w not in _EXCLUDE_NOISE]
+            if toks and toks not in phrases:
+                phrases.append(toks)
+        return phrases
+
+    def _update_exclusions(self, query: str) -> list[str]:
+        """Resolve an update query's exclusion clause to real installed packages.
+
+        Matches each requested product phrase against the names of packages this
+        system actually has installed, so the ``--ignore`` list names real
+        packages rather than guesses. Returns a sorted, de-duplicated list
+        (possibly empty).
+        """
+        phrases = self._exclude_phrases(query)
+        if not phrases:
+            return []
+        installed = _installed.installed_versions(self.system.package_manager)
+        hits = set()
+        for name in installed:
+            low = name.lower()
+            if any(all(tok in low for tok in phrase) for phrase in phrases):
+                hits.add(name)
+        return sorted(hits)
 
     def _cmd_cheat(self, arg: str) -> int:
         """Show a command cheat-sheet, or the list of topics."""
@@ -244,7 +350,11 @@ class App:
             self.ui.info("Try [bold]/cheat[/] for a topic list, or describe it differently.")
             return 1
         if answer.command == _howto.SYNC_SENTINEL:
-            answer.command = self._system_update_command()
+            ignore = self._update_exclusions(task)
+            answer.command = self._system_update_command(ignore=ignore)
+            if ignore:
+                answer.note = ("Skipping: " + ", ".join(ignore)
+                               + " — they won't be upgraded.")
         self.ui.show_howto(answer)
         return 0
 
@@ -259,7 +369,7 @@ class App:
             self.ui.warn(f"I'm not sure how to do \"{task}\" yet.")
             self.ui.info("Try [bold]/cheat[/] for common commands.")
             return 1
-        return self._present_howto(answer, offer_run=True)
+        return self._present_howto(answer, offer_run=True, query=task)
 
     def _cmd_disk(self) -> int:
         """Disk-space detective: free space plus the biggest folders."""

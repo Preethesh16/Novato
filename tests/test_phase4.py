@@ -137,4 +137,7 @@ def test_switch_invalid_raises(isolated_home):
 def test_mode_menu_covers_all_modes():
     modes = [m for m, _ in switcher.mode_menu()]
     assert set(modes) == set(cfgmod.VALID_MODES)
-    assert switcher.RECOMMENDED_MODE == "both"
+    # Online is recommended: installs/updates need the internet anyway, and Groq
+    # needs no multi-GB model download to get started.
+    assert switcher.RECOMMENDED_MODE == "online"
+    assert switcher.RECOMMENDED_MODE in cfgmod.VALID_MODES

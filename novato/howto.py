@@ -67,6 +67,7 @@ class HowtoAnswer:
     note: str = ""
     runnable: bool = True          # False -> show as reference, don't offer to run
     dangerous: bool = False
+    placeholder: bool = False      # command contains an example name to swap out
     score: float = 0.0
     matched_key: str = ""
 
@@ -325,6 +326,7 @@ def _build_answer(entry: HowtoEntry, key: str, score: float, query: str) -> Howt
     """Fill an entry's template with any extracted argument and a runnable flag."""
     command = entry.template
     runnable = not entry.dangerous
+    placeholder = False
 
     if "{arg}" in command:
         key_tokens = frozenset(_normalize(key))
@@ -336,9 +338,11 @@ def _build_answer(entry: HowtoEntry, key: str, score: float, query: str) -> Howt
             # never offer to run a command full of made-up names.
             command = command.format(arg=entry.default_arg)
             runnable = False
+            placeholder = True
     elif entry.default_arg:
         # A multi-argument template (rename/copy/move/ssh ...): always reference.
         runnable = False
+        placeholder = True
 
     if command == SYNC_SENTINEL:
         runnable = False  # main substitutes the real, distro-specific command
@@ -350,6 +354,7 @@ def _build_answer(entry: HowtoEntry, key: str, score: float, query: str) -> Howt
         note=entry.note,
         runnable=runnable,
         dangerous=entry.dangerous,
+        placeholder=placeholder,
         score=score,
         matched_key=key,
     )

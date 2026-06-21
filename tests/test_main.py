@@ -310,3 +310,61 @@ def test_switch_to_offline_without_model_warns(arch_system, isolated_home, monke
     app.slash(["/switch", "offline"])
     out = capsys.readouterr().out
     assert "download-model" in out
+
+
+# -- Smart "update except <packages>" -----------------------------------------
+
+def _app_with_packages(arch_system, monkeypatch, packages):
+    """An App whose 'installed packages' are a fixed set (for exclusion tests)."""
+    import novato.installed as installedmod
+    monkeypatch.setattr(installedmod, "installed_versions",
+                        lambda pm: {p: "1.0" for p in packages})
+    return _scripted_app(arch_system, [], monkeypatch)
+
+
+def test_update_with_exclusion_ignores_matched_package(arch_system, isolated_home, monkeypatch, capsys):
+    app = _app_with_packages(arch_system, monkeypatch,
+                            ["android-studio", "visual-studio-code-bin", "firefox"])
+    app.run_query("update my arch system without updating android studio")
+    out = capsys.readouterr().out
+    assert "sudo pacman -Syu --ignore=android-studio" in out
+    assert "Skipping: android-studio" in out
+
+
+def test_exclusion_phrase_does_not_overmatch(arch_system, isolated_home, monkeypatch, capsys):
+    """'android studio' must not also drag in 'visual-studio-code' via 'studio'."""
+    app = _app_with_packages(arch_system, monkeypatch,
+                            ["android-studio", "visual-studio-code-bin"])
+    app.run_query("update everything except android studio")
+    out = capsys.readouterr().out
+    assert "android-studio" in out
+    assert "visual-studio-code-bin" not in out
+
+
+def test_update_without_exclusion_is_plain(arch_system, isolated_home, monkeypatch, capsys):
+    app = _app_with_packages(arch_system, monkeypatch, ["firefox"])
+    app.run_query("update my system")
+    out = capsys.readouterr().out
+    assert "sudo pacman -Syu" in out
+    assert "--ignore" not in out
+    # No misleading "replace the example name(s)" footer on a system update.
+    assert "Replace the example" not in out
+
+
+def test_exclusion_with_no_installed_match_explains(arch_system, isolated_home, monkeypatch, capsys):
+    app = _app_with_packages(arch_system, monkeypatch, ["firefox"])
+    app.run_query("update everything except photoshop")
+    out = capsys.readouterr().out
+    assert "sudo pacman -Syu" in out
+    assert "--ignore" not in out
+    assert "won't touch it anyway" in out
+
+
+def test_update_exclusions_resolves_phrases(arch_system, isolated_home, monkeypatch):
+    app = _app_with_packages(
+        arch_system, monkeypatch,
+        ["android-studio", "visual-studio-code-bin", "qemu-emulators-full", "firefox"],
+    )
+    # Two products, comma/or separated, each matched as a whole phrase.
+    ignore = app._update_exclusions("update but not android studio or visual studio code")
+    assert ignore == ["android-studio", "visual-studio-code-bin"]
