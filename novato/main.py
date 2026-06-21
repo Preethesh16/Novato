@@ -64,6 +64,8 @@ _EXCLUDE_MARKERS = (
 # by the time we check these the target is a package name.
 _REMOVE_VERBS = ("uninstall", "remove", "get rid of", "getting rid of",
                  "purge", "delete")
+# Word stems for typo-tolerant verb detection ("delet", "remov" -> a removal).
+_REMOVE_STEMS = ("delet", "remov", "uninstal", "purg")
 # Tokens to strip when isolating the package name from a removal request.
 _REMOVE_NOISE = frozenset({
     "uninstall", "remove", "removing", "get", "getting", "rid", "of", "purge",
@@ -225,36 +227,100 @@ class App:
     # -- Package removal: "uninstall firefox" -------------------------------
 
     def _try_remove(self, query: str) -> Optional[int]:
-        """Handle "remove/uninstall <package>" or "delete <file>". Or None.
+        """Handle "remove/uninstall <package>" or "delete <file/folder>". Or None.
 
-        A target that looks like a file on disk (it has an extension, or the
-        query says "file"/"folder") is treated as a deletion; otherwise it's a
-        package to uninstall. The generic "remove a file" with no name is caught
-        earlier by the how-to layer.
+        Deletion is grounded in what's actually on disk: we scan the current
+        folder for files/folders matching what the user described — so a name
+        with spaces ("blah blah.txt") or a small typo still resolves to the real
+        file. Uninstall is matched against installed packages. The bare "remove a
+        file" with no name is caught earlier by the how-to layer.
         """
         lower = query.lower()
-        if not any(verb in lower for verb in _REMOVE_VERBS):
+        if not self._has_remove_verb(lower):
             return None
         terms = [t for t in self._meaningful_terms(query)
                  if t not in _REMOVE_NOISE]
         if not terms:
             return None
-        looks_like_file = (any("." in t for t in terms)
-                           or "/" in query
-                           or any(w in lower for w in
-                                  ("file", "folder", "directory")))
-        if looks_like_file:
-            return self._delete_path(query)
-        return self._cmd_remove(terms)
 
-    def _delete_path(self, query: str) -> Optional[int]:
-        """Offer to delete a specific named file/folder (guarded + confirmed)."""
-        verbs = frozenset(w for verb in _REMOVE_VERBS for w in verb.split())
-        target = _howto._extract_arg(query, verbs)
-        if not target:
-            return None  # no concrete name -> fall through
-        recursive = any(w in query.lower() for w in ("folder", "directory"))
-        command = f"rm -r {target}" if recursive else f"rm {target}"
+        file_signal = (any("." in t for t in terms) or "/" in query
+                       or any(w in lower for w in ("file", "folder", "directory")))
+        files = self._matching_paths(query)
+        packages = self._matching_packages(terms)
+
+        # A clear file cue (extension, slash, or the word file/folder) plus a
+        # real match on disk -> delete it.
+        if file_signal and files:
+            return self._offer_delete(files)
+        # Otherwise prefer an installed package; fall back to a disk match for a
+        # bare name like "delete hello" (a folder in this directory).
+        if packages:
+            return self._offer_remove_package(packages)
+        if files:
+            return self._offer_delete(files)
+
+        self.ui.blank()
+        if file_signal:
+            self.ui.info("I don't see a file or folder like that in this folder "
+                         f"({os.getcwd()}).")
+        else:
+            self.ui.info(f"\"{' '.join(terms)}\" doesn't look installed, so there's "
+                         "nothing to remove.")
+        return 0
+
+    def _has_remove_verb(self, lower: str) -> bool:
+        """True if the query asks to remove/delete/uninstall (typo-tolerant)."""
+        if any(verb in lower for verb in _REMOVE_VERBS):
+            return True
+        return any(w.startswith(_REMOVE_STEMS) for w in lower.split())
+
+    def _matching_paths(self, query: str) -> list[str]:
+        """Files/folders in the current directory matching the user's words."""
+        import difflib
+        import re
+
+        try:
+            entries = os.listdir(".")
+        except OSError:
+            return []
+        words = [w for w in re.sub(r"[^a-z0-9.]+", " ", query.lower()).split()
+                 if len(w) > 1 and w not in _REMOVE_NOISE
+                 and not w.startswith(_REMOVE_STEMS)]
+        if not words:
+            return []
+        target = " ".join(words)
+        scored: list[tuple[float, str]] = []
+        for name in entries:
+            low = name.lower()
+            present = sum(1 for w in words if w.strip(".") and w.strip(".") in low)
+            coverage = present / len(words)
+            ratio = difflib.SequenceMatcher(None, target, low).ratio()
+            score = max(coverage, ratio)
+            if score >= 0.5:
+                scored.append((score, name))
+        scored.sort(key=lambda s: (-s[0], len(s[1])))
+        return [name for _, name in scored]
+
+    def _offer_delete(self, matches: list[str]) -> int:
+        """Confirm and (guarded) delete a real file/folder from the current dir."""
+        import shlex
+
+        if len(matches) == 1:
+            name = matches[0]
+        else:
+            self.ui.blank()
+            self.ui.info("A few things here match — which one?")
+            for i, n in enumerate(matches, 1):
+                kind = "folder" if os.path.isdir(n) else "file"
+                self.ui.info(f"  [bold cyan]{i}[/] {n}  ({kind})")
+            idx = self.ui.prompt_choice(len(matches))
+            if idx is None:
+                self.ui.info("Okay — nothing deleted.")
+                return 0
+            name = matches[idx]
+
+        recursive = os.path.isdir(name)
+        command = ("rm -r " if recursive else "rm ") + shlex.quote(name)
         answer = _howto.HowtoAnswer(
             command=command,
             explanation=("delete a whole folder and its contents" if recursive
@@ -264,40 +330,28 @@ class App:
             runnable=True,
             dangerous=True,
         )
-        return self._present_howto(answer, offer_run=True, query=query)
+        return self._present_howto(answer, offer_run=True)
 
-    def _cmd_remove(self, terms: list[str]) -> int:
-        """Find the installed package(s) matching ``terms`` and offer to remove."""
-        pm = self.system.package_manager
-        installed = _installed.installed_versions(pm)
-
-        # Prefer an exact package-name match ("firefox"); otherwise any installed
-        # package whose name contains every term ("visual studio code" ->
-        # visual-studio-code-bin).
+    def _matching_packages(self, terms: list[str]) -> list[str]:
+        """Installed packages matching ``terms`` (exact name first, then phrase)."""
+        installed = _installed.installed_versions(self.system.package_manager)
         joined = "-".join(terms)
         squashed = "".join(terms)
         exact = [n for n in installed if n.lower() in (joined, squashed)]
         if exact:
-            matches = sorted(exact)
-        else:
-            matches = sorted(n for n in installed
-                             if all(t in n.lower() for t in terms))
+            return sorted(exact)
+        return sorted(n for n in installed if all(t in n.lower() for t in terms))
 
-        if not matches:
-            self.ui.blank()
-            self.ui.info(
-                f"\"{' '.join(terms)}\" doesn't look installed, so there's "
-                "nothing to remove."
-            )
-            return 0
-
+    def _offer_remove_package(self, matches: list[str]) -> int:
+        """Confirm and run the uninstall for one of the matched packages."""
+        installed = _installed.installed_versions(self.system.package_manager)
         if len(matches) == 1:
             package = matches[0]
         else:
             self.ui.blank()
             self.ui.info("A few installed packages match — which one?")
             for i, name in enumerate(matches, 1):
-                self.ui.info(f"  [bold cyan]{i}[/] {name}  ({installed[name]})")
+                self.ui.info(f"  [bold cyan]{i}[/] {name}  ({installed.get(name, '')})")
             idx = self.ui.prompt_choice(len(matches))
             if idx is None:
                 self.ui.info("Okay — nothing removed.")
@@ -312,7 +366,8 @@ class App:
         command = verdict.sanitized or command
 
         self.ui.blank()
-        self.ui.info(f"[bold]{package}[/] is installed (version {installed[package]}).")
+        self.ui.info(f"[bold]{package}[/] is installed "
+                     f"(version {installed.get(package, '?')}).")
         self.ui.show_command(command)
 
         if self.dry_run:

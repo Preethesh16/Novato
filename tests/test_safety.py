@@ -98,3 +98,17 @@ def test_dangerous_rm_forms_stay_blocked():
     for cmd in ("rm -rf /", "rm -rf myfolder", "rm *", "rm ~", "rm /etc/passwd",
                 "rm ../../thing", "rm a b c", "rm .", 'rm "a; rm -rf /"'):
         assert not safety.validate(cmd).allowed, cmd
+
+
+def test_sanitize_preserves_quoting_for_spaces():
+    # Re-joining tokens must not drop the quotes around a spaced filename.
+    assert safety.sanitize("rm 'blah blah.txt'") == "rm 'blah blah.txt'"
+    v = safety.validate("rm 'blah blah.txt'")
+    assert v.allowed
+    assert v.sanitized == "rm 'blah blah.txt'"
+
+
+def test_sanitize_still_strips_autoconfirm():
+    assert safety.sanitize("sudo pacman -S firefox --noconfirm") == \
+        "sudo pacman -S firefox"
+    assert "--noconfirm" not in safety.validate("sudo pacman -S vlc --noconfirm").sanitized

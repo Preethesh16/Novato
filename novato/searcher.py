@@ -69,6 +69,10 @@ def _run(cmd: list[str]) -> tuple[int, str, str]:
             text=True,
             timeout=_SUBPROCESS_TIMEOUT,
             check=False,
+            # Read-only query commands must never read the terminal's stdin —
+            # otherwise a child run just before a y/N prompt can swallow the
+            # user's piped answer and the confirmation silently sees EOF.
+            stdin=subprocess.DEVNULL,
         )
         return proc.returncode, proc.stdout, proc.stderr
     except (subprocess.TimeoutExpired, OSError) as exc:
