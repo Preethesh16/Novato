@@ -398,33 +398,95 @@ class Tutorial:
     def run(self) -> int:
         """Run (or resume) the tutorial. Returns a process exit code."""
         self._intro()
-        if not self._run_track("universal", "the basics", UNIVERSAL):
-            return 0  # the learner chose to stop; progress is saved
+
+        start = self._choose_start(UNIVERSAL)
+        if start is None:
+            self.ui.blank()
+            self.ui.info("No problem — run /learn whenever you're ready. 👋")
+            return 0
+
+        did_basics = start < len(UNIVERSAL)
+        if did_basics:
+            if not self._run_track("universal", "the basics", UNIVERSAL, start_at=start):
+                return 0  # the learner chose to stop; progress is saved
 
         pkg_id = package_for_system(self.system)
         if pkg_id is None:
-            self._all_done()
+            if did_basics:
+                self._all_done()
             return 0
 
         label, lessons = PACKAGES[pkg_id]
         self.ui.blank()
-        self.ui.success("🎓 You've finished the basics!")
-        self.ui.info(f"There's a bonus track tailored to your system: [bold]{label}[/].")
-        if not self.ui.ask_yes_no("Want to continue with it now?", default_no=False):
+        if did_basics:
+            self.ui.success("🎓 You've finished the basics!")
+            self.ui.info(f"There's a bonus track tailored to your system: [bold]{label}[/].")
+            prompt = "Want to continue with it now?"
+        else:
+            self.ui.info(f"Skipping ahead to the track for your system: [bold]{label}[/].")
+            prompt = "Ready to start it?"
+        if not self.ui.ask_yes_no(prompt, default_no=False):
             self.ui.info("No problem — run /learn anytime to pick up where you left off.")
             return 0
         self._run_track(pkg_id, label, lessons)
         self._all_done()
         return 0
 
+    def _choose_start(self, lessons: tuple[Lesson, ...]) -> Optional[int]:
+        """Show the lesson index and ask where to dive in.
+
+        Returns a 0-based start index into the universal track, ``len(lessons)``
+        to skip the basics and jump straight to the distro track, or ``None`` if
+        the learner wants to quit.
+        """
+        self.ui.blank()
+        self.ui.info("[bold]The core lessons:[/]")
+        for i, lesson in enumerate(lessons, 1):
+            self.ui.info(f"  [bold cyan]{i:>2}[/]  {lesson.title}")
+
+        saved = int(self.config.learn_progress.get("universal", 0))
+        self.ui.blank()
+        self.ui.info("How comfortable are you with the terminal? Jump in wherever fits:")
+        self.ui.info("  • Press [bold]Enter[/] — brand new, start from lesson 1")
+        self.ui.info("  • Type a [bold]lesson number[/] above to start there")
+        if 0 < saved < len(lessons):
+            self.ui.info(f"  • Type [bold]r[/] — resume where you left off (lesson {saved + 1})")
+        self.ui.info("  • Type [bold]skip[/] — already know the basics, go to the "
+                     "system-specific track")
+        self.ui.info("  • Type [bold]q[/] — quit")
+
+        raw = self._safe_input("\nWhere should we start? ")
+        if raw is None:
+            return None
+        choice = raw.strip().lower()
+        if choice in _QUIT_WORDS:
+            return None
+        if choice == "":
+            return 0
+        if choice in ("r", "resume") and 0 < saved < len(lessons):
+            return saved
+        if choice in ("skip", "s"):
+            return len(lessons)
+        if choice.isdigit():
+            n = int(choice)
+            if 1 <= n <= len(lessons):
+                return n - 1
+            self.ui.warn(f"There are {len(lessons)} lessons — starting from the top.")
+        return 0
+
     # -- track / lesson flow ------------------------------------------------
 
-    def _run_track(self, track_id: str, label: str, lessons: tuple[Lesson, ...]) -> bool:
-        """Run the lessons in a track from saved progress. Returns False if the
-        learner asked to stop partway (progress saved)."""
-        start = int(self.config.learn_progress.get(track_id, 0))
-        if start >= len(lessons):
-            start = 0  # already complete -> let them replay from the top
+    def _run_track(self, track_id: str, label: str, lessons: tuple[Lesson, ...],
+                   *, start_at: Optional[int] = None) -> bool:
+        """Run the lessons in a track. Returns False if the learner asked to stop
+        partway (progress saved). ``start_at`` overrides saved progress when the
+        learner explicitly chose an entry point."""
+        if start_at is not None:
+            start = max(0, min(start_at, len(lessons) - 1))
+        else:
+            start = int(self.config.learn_progress.get(track_id, 0))
+            if start >= len(lessons):
+                start = 0  # already complete -> let them replay from the top
         for i in range(start, len(lessons)):
             if self._teach(lessons[i], i + 1, len(lessons), label):
                 # Learner quit mid-lesson: resume *at* this lesson next time.

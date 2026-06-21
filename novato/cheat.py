@@ -80,6 +80,23 @@ CHEATSHEETS: dict[str, list[tuple[str, str]]] = {
         ("Ctrl+Shift+C", "copy selected text (NOT Ctrl+C!)"),
         ("Ctrl+Shift+V", "paste into the terminal"),
     ],
+    # Novato's own commands — so `/cheat novato` is a quick reminder of what the
+    # tool itself can do, not just raw Linux commands.
+    "novato": [
+        ('novato "what you want"', "install software by describing it"),
+        ('novato "remove firefox"', "uninstall a package you no longer want"),
+        ('novato "unzip this file"', "do a terminal task in plain English"),
+        ('novato /man "extract a tar"', "show the one command for a task"),
+        ("novato /learn", "interactive step-by-step terminal tutorial"),
+        ("novato /cheat [topic]", "these quick reference sheets"),
+        ("novato /explain ls -la", "explain any command, flag by flag"),
+        ("novato /disk", "see what's filling up your disk"),
+        ("novato /process [port]", "see what's running / using a port"),
+        ("novato /switch [mode]", "change AI mode (basic/offline/online/both)"),
+        ("novato /mistake on", "let Novato catch failed commands and suggest fixes"),
+        ("novato /status", "show current mode, distro, and shell"),
+        ("novato /help", "list every command"),
+    ],
 }
 
 # A friendly one-line summary per category, shown as the table's subtitle.
@@ -92,6 +109,7 @@ CATEGORY_BLURBS: dict[str, str] = {
     "text": "searching and reading text",
     "archives": "zip and tar files",
     "shortcuts": "keyboard tricks that save hours",
+    "novato": "what Novato itself can do for you",
 }
 
 
@@ -122,6 +140,8 @@ def resolve_category(arg: str) -> str | None:
         "grep": "text", "archive": "archives", "zip": "archives",
         "tar": "archives", "shortcut": "shortcuts", "keyboard": "shortcuts",
         "keys": "shortcuts", "key": "shortcuts",
+        "command": "novato", "commands": "novato", "cmd": "novato",
+        "self": "novato", "me": "novato", "tool": "novato", "app": "novato",
     }
     if arg in CHEATSHEETS:
         return arg
