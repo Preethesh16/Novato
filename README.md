@@ -68,18 +68,48 @@ one day you won't need it. That's the point.
 
 ## Install
 
+The recommended way is to install straight from GitHub as a **global `novato`
+command** — no PyPI account, no `uv run` prefix. Use a CLI installer
+(`pipx` or `uv`) so it lands in its own isolated environment and on your `PATH`:
+
 ```bash
-# From PyPI (recommended for most users)
-pip install novato
+# Option A — pipx (most distros)
+pipx install git+https://github.com/Preethesh16/Novato.git
+pipx ensurepath          # one-time: makes `novato` available in new shells
 
-# On Arch / Manjaro (AUR)
-yay -S novato            # once published
+# Option B — uv
+uv tool install git+https://github.com/Preethesh16/Novato.git
+uv tool update-shell     # one-time PATH setup
 
-# From source (development)
-git clone https://github.com/novato-cli/novato
-cd novato
-uv sync                  # create env + install deps
+# Then, from anywhere:
+novato --help
+```
+
+> Don't have an installer yet? `python -m pip install --user pipx` (or grab `uv`
+> from <https://astral.sh/uv>). On Arch/Manjaro you can also `sudo pacman -S
+> python-pipx`. Plain `pip install --user` fails on modern Linux because the
+> system Python is externally managed — that's what `pipx`/`uv` exist to solve.
+
+```bash
+# Update later, or remove:
+pipx upgrade novato       # (uv: uv tool upgrade novato)
+pipx uninstall novato     # (uv: uv tool uninstall novato)
+```
+
+**From source (for hacking on Novato):**
+
+```bash
+git clone https://github.com/Preethesh16/Novato.git
+cd Novato
+uv sync                   # create env + install deps
 uv run novato --help
+uv run pytest             # run the test suite
+```
+
+```bash
+# Coming soon, once published:
+pip install novato        # PyPI
+yay -S novato             # Arch User Repository
 ```
 
 First run launches a one-time setup wizard. You can skip it and stay on **Basic
