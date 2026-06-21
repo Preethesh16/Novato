@@ -37,9 +37,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/novato-cli/novato"
-Repository = "https://github.com/novato-cli/novato"
-Documentation = "https://github.com/novato-cli/novato/blob/main/DOCUMENTATION.md"
+Homepage = "https://github.com/Preethesh16/Novato"
+Repository = "https://github.com/Preethesh16/Novato"
+Documentation = "https://github.com/Preethesh16/Novato/blob/main/DOCUMENTATION.md"
 
 [project.scripts]
 novato = "novato.main:main"
