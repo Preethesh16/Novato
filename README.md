@@ -149,7 +149,9 @@ sudo pacmna -S vlc        # typo → Novato catches it and suggests the fix
 | `/cheat [topic]` | Quick command reference (`files`, `network`, `shortcuts`, …) |
 | `/explain <command>` | Explain any command flag by flag (e.g. `/explain ls -la /etc`) |
 | `/explain [on\|off]` | Toggle teaching mode on installs |
-| `/disk` | See what's filling up your disk (free space + biggest folders) |
+| `/disk` | Deep-scan storage, offer safe distro-aware cleanup, then verify free space |
+| `/space` | Quickly show total, used, and available storage (read-only) |
+| `/clean storage` | Run the safe deep-scan and cleanup workflow |
 | `/process [port]` | See what's running, or what's using a port — and stop it |
 | `/switch [online\|offline\|both\|basic]` | Change AI mode (no arg shows a menu) |
 | `/mistake [on\|off]` | Toggle the silent error watcher |
@@ -161,6 +163,29 @@ sudo pacmna -S vlc        # typo → Novato catches it and suggests the fix
 > "unzip this file"` works the same. `/disk` and `/process` are named shortcuts
 > for `novato "why is my disk full"` and `novato "what's using port 8080"`. The
 > slash forms are there for when you want to be explicit.
+
+### Smart storage cleanup
+
+Use `novato check space` for an immediate read-only capacity report. Use
+`novato clean storage safely`, ask `novato "free storage for me"`, or run
+`novato /disk` for cleanup. Novato detects the package manager used by Arch,
+Ubuntu/Debian, or Fedora, then:
+
+1. performs a read-only deep scan and shows current free space, large folders,
+   and the biggest application-cache areas;
+2. identifies measurable cleanup such as downloaded package files, Trash, and
+   oversized old system logs;
+3. explains and shows every cleanup command, asking `y/N` separately for each;
+4. scans again and reports the actual space recovered and space remaining.
+
+Personal files and arbitrary application-cache folders are review-only. Novato
+does not guess that Downloads, projects, photos, or offline app data are junk.
+
+Storage routing uses Novato's intent system rather than a substring shortcut.
+Online and Offline modes ask their language model to classify the user's goal;
+Basic mode falls back to private concept, synonym, and typo-aware matching. This
+keeps paraphrases working while preventing requests such as "clean this code"
+or "install a disk usage tool" from launching storage cleanup.
 
 ---
 

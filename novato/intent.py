@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .backends.basic_backend import BasicBackend, IntentResult
+from .task_intent import TaskIntent
 
 
 @dataclass
@@ -61,3 +62,13 @@ class IntentResolver:
             confidence=result.score,
             backend=getattr(result, "source", self.backend_name),
         )
+
+    def resolve_task(self, query: str) -> TaskIntent:
+        """Classify a request for a built-in action through the active backend."""
+        query = query.strip()
+        if not query:
+            return TaskIntent(query="", source=self.backend_name)
+        classify = getattr(self._backend, "resolve_task", None)
+        if classify is None:
+            return TaskIntent(query=query, source=self.backend_name)
+        return classify(query)

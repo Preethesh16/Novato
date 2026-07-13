@@ -24,6 +24,7 @@ import re
 from typing import Optional
 
 from .basic_backend import IntentResult
+from ..task_intent import TASK_ACTIONS, TaskIntent
 
 try:  # requests is a core dependency, but guard so import never hard-fails.
     import requests
@@ -51,6 +52,16 @@ _ERROR_SYSTEM_PROMPT = (
     "summary, reason is a 1-2 sentence plain-English explanation assuming zero "
     "Linux knowledge, and fix is a single safe command to run (or empty string "
     "if none). Never suggest rm, dd, mkfs, fdisk, or any destructive command."
+)
+
+_TASK_SYSTEM_PROMPT = (
+    "Classify a Linux user's request as one built-in action. Reply with ONLY a "
+    "JSON object like {\"action\": \"storage_check\", \"confidence\": 0.95}. "
+    "Allowed actions: storage_check (only view total/used/available disk space), "
+    "storage_clean (scan for unnecessary data and safely offer cleanup), or none "
+    "when neither meaning applies. Understand paraphrases and the user's goal; do "
+    "not rely on one keyword. A request to install software is always none, even "
+    "when the software relates to disks. Never invent another action."
 )
 
 
@@ -113,6 +124,21 @@ class GroqBackend:
             score=0.9,
             source="online",
         )
+
+    def resolve_task(self, query: str) -> TaskIntent:
+        """Use the language model to classify built-in Novato actions."""
+        text = self._chat(_TASK_SYSTEM_PROMPT, query.strip())
+        obj = _parse_json_object(text) if text else None
+        if not obj:
+            return TaskIntent(query, source=self.name)
+        action = str(obj.get("action", "")).strip().lower()
+        try:
+            confidence = float(obj.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        if action not in TASK_ACTIONS or confidence < 0.65:
+            return TaskIntent(query, source=self.name)
+        return TaskIntent(query, action, min(1.0, confidence), self.name)
 
     def describe(self, package: str) -> str:  # noqa: D401 - parity with BasicBackend
         """Groq doesn't pre-describe; the searcher supplies real descriptions."""

@@ -92,17 +92,19 @@ def disk_mounts(run: Runner = _default_run) -> list[DiskMount]:
 
 
 def largest_dirs(
-    path: str = "~", *, limit: int = 8, run: Runner = _default_run
+    path: str = "~", *, limit: int = 8, depth: int = 1,
+    run: Runner = _default_run,
 ) -> list[DirSize]:
     """Return the biggest immediate sub-folders of ``path``, largest first.
 
-    Uses ``du`` on the directory's direct children only (``--max-depth=1``) so a
-    huge home folder doesn't take forever. Best-effort: returns [] if du can't
-    read the tree.
+    ``depth=1`` measures direct children; the storage deep scan uses two levels
+    to identify a large cache/application without walking every file itself.
+    Best-effort: returns [] if du can't read the tree.
     """
-    # -x stays on one filesystem; 2>/dev/null is added by the caller's shell-free
-    # runner via stderr suppression below.
-    out = run(f"du -h --max-depth=1 {path}")
+    # -x stays on one filesystem. The shell-free runner captures stderr so
+    # permission-denied noise does not spill into the beginner-facing report.
+    depth = max(1, min(depth, 3))
+    out = run(f"du -h -x --max-depth={depth} {shlex.quote(path)}")
     rows: list[DirSize] = []
     for line in out.splitlines():
         parts = line.split("\t") if "\t" in line else line.split(None, 1)

@@ -235,16 +235,119 @@ def test_package_query_still_reaches_search(arch_system, isolated_home, monkeypa
     assert seen["called"] is True
 
 
-def test_disk_full_query_routes_to_disk(arch_system, isolated_home, monkeypatch):
-    from novato import sysinfo as sysmod
-    routed = {"disk": False}
-    monkeypatch.setattr(sysmod, "disk_mounts",
-                        lambda **k: routed.__setitem__("disk", True) or [])
-    monkeypatch.setattr(sysmod, "largest_dirs", lambda *a, **k: [])
+def test_disk_full_query_routes_to_space_check(arch_system, isolated_home, monkeypatch):
+    import novato.main as mainmod
+    from novato.storage import StorageScan
+
+    routed = {"space": False}
+    monkeypatch.setattr(
+        mainmod._storage, "capacity_scan",
+        lambda path: routed.__setitem__("space", True)
+        or StorageScan(10_000, 7_000, 3_000),
+    )
     app = App(system=arch_system, config=cfgmod.Config(),
               presenter=Presenter(input_fn=lambda p: "q"))
     app.run_query("why is my disk full")
+    assert routed["space"] is True
+
+
+@pytest.mark.parametrize("query", [
+    "check space",
+    "tell me how much room is remaining on my drive",
+])
+def test_storage_check_does_not_enter_cleanup(
+    query, arch_system, isolated_home, monkeypatch
+):
+    import novato.main as mainmod
+    from novato.storage import StorageScan
+
+    monkeypatch.setattr(
+        mainmod._storage, "capacity_scan",
+        lambda path: StorageScan(10_000, 7_000, 3_000),
+    )
+    monkeypatch.setattr(
+        mainmod._storage, "deep_scan",
+        lambda *a, **k: pytest.fail("a space check entered cleanup"),
+    )
+    app = _scripted_app(arch_system, [], monkeypatch)
+    assert app.run_query(query) == 0
+
+
+@pytest.mark.parametrize("query", [
+    "free storage for me",
+    "clear storage",
+    "clean space on my system",
+])
+def test_storage_phrases_route_to_disk(
+    query, arch_system, isolated_home, monkeypatch
+):
+    import novato.main as mainmod
+    from novato.storage import StorageScan
+
+    routed = {"disk": False}
+
+    def scan(*args, **kwargs):
+        routed["disk"] = True
+        return StorageScan(10_000, 7_000, 3_000)
+
+    monkeypatch.setattr(mainmod._storage, "deep_scan", scan)
+    monkeypatch.setattr(mainmod._sysinfo, "disk_mounts", lambda: [])
+    monkeypatch.setattr(mainmod._sysinfo, "has_ncdu", lambda: True)
+    app = _scripted_app(arch_system, [], monkeypatch, dry_run=True)
+    assert app.run_query(query) == 0
     assert routed["disk"] is True
+
+
+def test_disk_cleanup_confirms_command_and_rescans(
+    arch_system, isolated_home, monkeypatch
+):
+    import novato.main as mainmod
+    from novato.executor import ExecResult
+    from novato.storage import CleanupItem, StorageScan
+
+    cleanup = CleanupItem(
+        "packages", "Downloaded package cache", "Old installers.",
+        "sudo pacman -Sc", 500,
+    )
+    scans = iter([
+        StorageScan(10_000, 7_000, 3_000, cleanup=[cleanup]),
+        StorageScan(10_000, 6_500, 3_500),
+    ])
+    monkeypatch.setattr(mainmod._storage, "deep_scan", lambda *a, **k: next(scans))
+    monkeypatch.setattr(mainmod._sysinfo, "disk_mounts", lambda: [])
+    monkeypatch.setattr(mainmod._sysinfo, "has_ncdu", lambda: True)
+    called = []
+    monkeypatch.setattr(
+        mainmod, "execute",
+        lambda command, **kwargs: called.append(command)
+        or ExecResult(command, 0, executed=True),
+    )
+
+    app = _scripted_app(arch_system, ["y"], monkeypatch)
+    assert app._cmd_disk() == 0
+    assert called == ["sudo pacman -Sc"]
+
+
+def test_disk_cleanup_dry_run_only_shows_commands(
+    arch_system, isolated_home, monkeypatch
+):
+    import novato.main as mainmod
+    from novato.storage import CleanupItem, StorageScan
+
+    scan = StorageScan(10_000, 7_000, 3_000, cleanup=[CleanupItem(
+        "packages", "Downloaded package cache", "Old installers.",
+        "sudo pacman -Sc", 500,
+    )])
+    monkeypatch.setattr(mainmod._storage, "deep_scan", lambda *a, **k: scan)
+    monkeypatch.setattr(mainmod._sysinfo, "disk_mounts", lambda: [])
+    monkeypatch.setattr(mainmod._sysinfo, "has_ncdu", lambda: True)
+    monkeypatch.setattr(
+        mainmod, "execute",
+        lambda *a, **k: pytest.fail("dry-run storage cleanup executed a command"),
+    )
+
+    app = _scripted_app(arch_system, ["y"], monkeypatch, dry_run=True)
+    assert app._cmd_disk() == 0
 
 
 def test_slash_cheat_known_and_unknown(arch_system, isolated_home):

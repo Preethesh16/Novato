@@ -40,6 +40,20 @@ def test_largest_dirs_sorted_descending_and_excludes_self():
     assert paths[0] == "/home/u/Videos"  # 2.4G is the biggest child
 
 
+def test_largest_dirs_honours_bounded_scan_depth():
+    seen = {}
+
+    def fake_run(command):
+        seen["command"] = command
+        return _DU
+
+    sysinfo.largest_dirs("/home/u", depth=2, run=fake_run)
+    assert "--max-depth=2" in seen["command"]
+
+    sysinfo.largest_dirs("/home/u", depth=99, run=fake_run)
+    assert "--max-depth=3" in seen["command"]
+
+
 def test_size_to_bytes_orders_units():
     assert sysinfo._size_to_bytes("1G") > sysinfo._size_to_bytes("900M")
     assert sysinfo._size_to_bytes("2K") > sysinfo._size_to_bytes("500B")

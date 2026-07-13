@@ -416,8 +416,11 @@ novato /cheat network      # ping, curl, wget, ssh...
 Two of the most common beginner panics have dedicated helpers:
 
 ```bash
-novato /disk               # free space + the biggest folders eating it
+novato /disk               # deep scan + optional safe cleanup + verify space
 novato "why is my disk full"   # same thing, in plain English
+novato "free storage for me"   # same smart cleanup flow
+novato check space             # fast read-only available/used/total report
+novato clean storage safely    # deep scan, confirm cleanup, verify again
 
 novato /process            # what's running (and stop it, if you want)
 novato /process 8080       # what's holding port 8080

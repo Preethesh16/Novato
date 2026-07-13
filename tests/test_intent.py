@@ -6,6 +6,7 @@ import pytest
 
 from novato import intent_map
 from novato.backends.basic_backend import BasicBackend, normalize_query
+from novato.task_intent import STORAGE_CHECK, STORAGE_CLEAN
 
 
 def test_intent_map_is_well_formed():
@@ -80,6 +81,43 @@ def test_unknown_intent_returns_empty():
     result = backend.resolve_intent("xyzzy quux frobnicate")
     assert not result.found
     assert result.candidates == []
+
+
+@pytest.mark.parametrize("query", [
+    "check space",
+    "how much room do I have remaining?",
+    "show me the available capacity on this drive",
+    "why is my disk almost full?",
+    "do I have enough room for another game?",
+    "is my drive getting crowded?",
+    "chek my storaje",  # typo tolerance
+])
+def test_basic_semantic_task_intent_checks_storage(query):
+    result = BasicBackend().resolve_task(query)
+    assert result.action == STORAGE_CHECK
+
+
+@pytest.mark.parametrize("query", [
+    "clean storage safely",
+    "help me reclaim disk space",
+    "free up some room on my drive",
+    "remove unnecessary cache",
+    "can you make more room?",
+    "get rid of temporary data",
+])
+def test_basic_semantic_task_intent_cleans_storage(query):
+    result = BasicBackend().resolve_task(query)
+    assert result.action == STORAGE_CLEAN
+
+
+@pytest.mark.parametrize("query", [
+    "clean up this code",
+    "check my email",
+    "delete a file",
+    "install a disk usage tool",
+])
+def test_basic_task_intent_does_not_hijack_unrelated_requests(query):
+    assert not BasicBackend().resolve_task(query).found
 
 
 def test_lookup_helper():

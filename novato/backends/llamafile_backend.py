@@ -21,9 +21,11 @@ from .basic_backend import IntentResult
 from .groq_backend import (
     _ERROR_SYSTEM_PROMPT,
     _INTENT_SYSTEM_PROMPT,
+    _TASK_SYSTEM_PROMPT,
     _parse_json_object,
     _parse_package_list,
 )
+from ..task_intent import TASK_ACTIONS, TaskIntent
 
 _TIMEOUT = 30  # seconds — local CPU inference is slower than Groq.
 _MAX_CANDIDATES = 6
@@ -95,6 +97,20 @@ class LlamafileBackend:
             score=0.8,
             source="offline",
         )
+
+    def resolve_task(self, query: str) -> TaskIntent:
+        text = self._complete(_TASK_SYSTEM_PROMPT, query.strip())
+        obj = _parse_json_object(text) if text else None
+        if not obj:
+            return TaskIntent(query, source=self.name)
+        action = str(obj.get("action", "")).strip().lower()
+        try:
+            confidence = float(obj.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        if action not in TASK_ACTIONS or confidence < 0.65:
+            return TaskIntent(query, source=self.name)
+        return TaskIntent(query, action, min(1.0, confidence), self.name)
 
     def describe(self, package: str) -> str:
         return ""

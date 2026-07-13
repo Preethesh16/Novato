@@ -273,6 +273,61 @@ class Presenter:
             self.console.print("\n[dim]Tip: install [bold]ncdu[/] for an "
                                "interactive disk explorer — 'novato ncdu'.[/]")
 
+    def show_storage_scan(self, scan, *, mounts=(), scanned_path: str = "",
+                          suggest_ncdu: bool = False) -> None:
+        """Render the deep scan while keeping personal data clearly separate."""
+        from .storage import format_bytes
+
+        self.show_disk(mounts, scan.large_dirs, scanned_path=scanned_path,
+                       suggest_ncdu=suggest_ncdu)
+        self.console.print(
+            f"\nOn your home filesystem: [bold]{format_bytes(scan.free_bytes)} free[/] "
+            f"of {format_bytes(scan.total_bytes)}."
+        )
+        if scan.cache_dirs:
+            self.console.print("\nLargest app-cache areas (review only):")
+            for entry in scan.cache_dirs:
+                self.console.print(f"  [bold]{entry.size:>6}[/]  {entry.path}")
+            self.console.print(
+                "[dim]Caches can contain offline files or active app data, so Novato "
+                "does not label every cache folder as safe to erase.[/]"
+            )
+
+    def show_cleanup_item(self, item) -> None:
+        """Explain one cleanup candidate and its measured upper-bound saving."""
+        from .storage import format_bytes
+
+        self.console.print()
+        self.console.print(
+            f"[bold cyan]{item.title}[/] — up to "
+            f"[bold]{format_bytes(item.estimated_bytes)}[/]"
+        )
+        self.console.print(f"  {item.description}")
+
+    def show_storage_result(self, before, after) -> None:
+        """Show actual reclaimed and remaining space after the verification scan."""
+        from .storage import format_bytes
+
+        recovered = max(0, after.free_bytes - before.free_bytes)
+        self.console.print()
+        self.success(f"Recovered {format_bytes(recovered)}.")
+        self.console.print(
+            f"Free space now: [bold green]{format_bytes(after.free_bytes)}[/] "
+            f"of {format_bytes(after.total_bytes)}."
+        )
+
+    def show_space(self, scan, *, distro_name: str = "") -> None:
+        """Give a direct capacity answer without entering the cleanup workflow."""
+        from .storage import format_bytes
+
+        where = f" on {distro_name}" if distro_name else ""
+        self.console.print()
+        self.console.print(f"💾 Storage{where}")
+        self.console.print(f"  Available: [bold green]{format_bytes(scan.free_bytes)}[/]")
+        self.console.print(f"  Used:      {format_bytes(scan.used_bytes)}")
+        self.console.print(f"  Total:     {format_bytes(scan.total_bytes)}")
+        self.console.print("\n[dim]To safely find cleanup options: novato clean storage safely[/]")
+
     # -- Process helper (/process) ------------------------------------------
 
     def show_processes(self, procs, *, title: str = "Running programs") -> None:

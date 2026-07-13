@@ -11,6 +11,7 @@ from novato.backends.llamafile_backend import LlamafileBackend, select_model
 from novato.backends.router import Router, build_router
 from novato.config import Config
 from novato.rules import ErrorContext
+from novato.task_intent import STORAGE_CHECK, STORAGE_CLEAN
 
 
 # -- response parsing -------------------------------------------------------
@@ -67,6 +68,20 @@ def test_groq_resolve_intent():
     assert result.source == "online"
 
 
+def test_groq_understands_task_paraphrase():
+    backend = _groq_with_content(
+        '{"action":"storage_clean","confidence":0.94}'
+    )
+    result = backend.resolve_task("help this machine breathe again safely")
+    assert result.action == STORAGE_CLEAN
+    assert result.source == "online"
+
+
+def test_groq_rejects_unknown_or_uncertain_task_action():
+    backend = _groq_with_content('{"action":"erase_everything","confidence":1}')
+    assert not backend.resolve_task("do something").found
+
+
 def test_groq_error_analysis_blocks_destructive_fix():
     # Even if the model returns a destructive fix, safety must strip it.
     backend = _groq_with_content('{"title":"oops","reason":"bad","fix":"rm -rf /"}')
@@ -106,6 +121,13 @@ def test_llamafile_with_injected_runner():
     assert result.source == "offline"
 
 
+def test_llamafile_understands_task_paraphrase():
+    backend = LlamafileBackend(
+        "", runner=lambda prompt: '{"action":"storage_check","confidence":0.91}',
+    )
+    assert backend.resolve_task("do I still have room?").action == STORAGE_CHECK
+
+
 def test_llamafile_unavailable_without_binary():
     assert LlamafileBackend("/nonexistent/path").available is False
 
@@ -130,6 +152,19 @@ def test_router_falls_through_to_basic_when_ai_empty():
     # Basic mode rescued it.
     assert result.found
     assert "kdenlive" in result.candidates
+
+
+def test_router_task_falls_through_to_basic_when_ai_is_unsure():
+    class _Empty:
+        name = "online"
+
+        def resolve_task(self, query):
+            from novato.task_intent import TaskIntent
+            return TaskIntent(query, source="online")
+
+    result = Router([_Empty(), BasicBackend()]).resolve_task("check my disk space")
+    assert result.action == STORAGE_CHECK
+    assert result.source == "basic"
 
 
 def test_build_router_basic_mode():

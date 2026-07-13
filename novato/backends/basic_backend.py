@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 
 from .. import intent_map as _im
 from .. import rules as _rules
+from ..task_intent import STORAGE_CHECK, STORAGE_CLEAN, TaskIntent
 
 # Filler words stripped from a query before matching, so "i want to edit my
 # videos please" reduces to the signal: "edit videos".
@@ -121,6 +122,60 @@ class BasicBackend:
             return IntentResult(query, key, list(self._intents[key]), score)
 
         return IntentResult(query)
+
+    def resolve_task(self, query: str) -> TaskIntent:
+        """Classify built-in actions from concepts, synonyms, and light fuzzing.
+
+        This is the private/offline fallback. It deliberately requires a
+        storage concept as well as an inspect/cleanup concept, preventing words
+        such as "clean code" or "check email" from triggering disk operations.
+        Smarter configured backends classify broader paraphrases before this
+        fallback is consulted.
+        """
+        raw_tokens = re.findall(r"[a-z0-9]+", query.lower())
+        if not raw_tokens:
+            return TaskIntent(query)
+        # An explicit software-acquisition request belongs to the package flow,
+        # even if the desired program happens to contain words like "disk usage".
+        if set(raw_tokens) & {"install", "download", "application", "program", "tool"}:
+            return TaskIntent(query)
+
+        concepts = {
+            "storage": {
+                "storage", "disk", "drive", "space", "filesystem", "capacity",
+                "room", "full", "cache", "temporary", "temp",
+            },
+            "clean": {
+                "clean", "cleanup", "clear", "free", "reclaim", "recover",
+                "remove", "delete", "junk", "cache", "unnecessary", "unused",
+                "purge", "empty", "tidy", "make", "more", "rid",
+            },
+            "check": {
+                "check", "show", "see", "inspect", "available", "remaining",
+                "left", "usage", "used", "capacity", "status", "much", "why",
+                "enough", "low", "crowded",
+            },
+        }
+
+        def has_concept(words: set[str]) -> bool:
+            for token in raw_tokens:
+                if token in words:
+                    return True
+                # Typo tolerance without turning unrelated short words into a hit.
+                if len(token) >= 4 and difflib.get_close_matches(
+                    token, words, n=1, cutoff=0.78,
+                ):
+                    return True
+            return False
+
+        storage = has_concept(concepts["storage"])
+        clean = has_concept(concepts["clean"])
+        check = has_concept(concepts["check"])
+        if storage and clean:
+            return TaskIntent(query, STORAGE_CLEAN, 0.9, self.name)
+        if storage and check:
+            return TaskIntent(query, STORAGE_CHECK, 0.88, self.name)
+        return TaskIntent(query)
 
     def _token_overlap(self, norm_query: str) -> tuple[str, float] | None:
         """Return the intent with the highest token-overlap ratio, or None."""

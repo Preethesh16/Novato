@@ -28,6 +28,7 @@ from ..config import Config
 from .basic_backend import BasicBackend, IntentResult
 from .groq_backend import GroqBackend
 from .llamafile_backend import LlamafileBackend
+from ..task_intent import TaskIntent
 
 
 def internet_available(host: str = "api.groq.com", port: int = 443, timeout: float = 2.0) -> bool:
@@ -77,6 +78,22 @@ class Router:
             if result.found:
                 return result
         return last or IntentResult(query)
+
+    def resolve_task(self, query: str) -> TaskIntent:
+        """Ask smart tiers first, falling back to the private basic classifier."""
+        last: Optional[TaskIntent] = None
+        for backend in self._backends:
+            classify = getattr(backend, "resolve_task", None)
+            if classify is None:
+                continue
+            try:
+                result = classify(query)
+            except Exception:
+                continue
+            last = result
+            if result.found:
+                return result
+        return last or TaskIntent(query)
 
     def analyze_error(self, ctx):
         """Return the first backend that produces a diagnosis, else None."""

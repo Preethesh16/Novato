@@ -29,6 +29,7 @@ from . import installed as _installed
 from . import logger as _logger
 from . import rules as _rules
 from . import safety as _safety
+from . import storage as _storage
 from . import switcher as _switcher
 from . import sysinfo as _sysinfo
 from . import watcher as _watcher
@@ -39,14 +40,7 @@ from .presenter import Presenter
 from .ranker import rank
 from .searcher import search_candidates
 from .teacher import Teacher
-
-# Natural-language phrases that should open the rich disk report rather than be
-# treated as a package request.
-_DISK_FULL_HINTS = (
-    "disk full", "disk is full", "out of space", "running out of space",
-    "no space left", "free up space", "taking up space", "taking space",
-    "what's taking", "what is taking", "low on space", "storage full",
-)
+from .task_intent import STORAGE_CHECK, STORAGE_CLEAN
 
 # Phrases that introduce an "...except these" clause in a system-update request,
 # e.g. "update everything without touching android studio". Longest first so a
@@ -207,11 +201,13 @@ class App:
         Returns an exit code if handled, or ``None`` to fall through to the
         normal package-search flow.
         """
-        lower = query.lower()
-
-        # "why is my disk full" and friends -> the rich disk report.
-        if any(hint in lower for hint in _DISK_FULL_HINTS):
+        task = self.resolver.resolve_task(query)
+        if task.action == STORAGE_CLEAN:
             return self._cmd_disk()
+        if task.action == STORAGE_CHECK:
+            return self._cmd_space()
+
+        lower = query.lower()
 
         # "what's using port 8080" -> the process/port helper.
         if "port" in lower and _sysinfo.extract_port(query) is not None:
@@ -575,15 +571,74 @@ class App:
         return self._present_howto(answer, offer_run=True, query=task)
 
     def _cmd_disk(self) -> int:
-        """Disk-space detective: free space plus the biggest folders."""
+        """Deep-scan storage, offer conservative cleanup, then verify space."""
         home = os.path.expanduser("~")
         mounts = _sysinfo.disk_mounts()
-        big = _sysinfo.largest_dirs(home, limit=8)
-        if not mounts and not big:
+        self.ui.status_line(self.config.mode, "Deep-scanning storage (read-only)...")
+        try:
+            before = _storage.deep_scan(self.system.package_manager, home)
+        except OSError:
+            before = None
+        if before is None:
             self.ui.warn("Couldn't read disk information on this system.")
             return 1
-        self.ui.show_disk(mounts, big, scanned_path=home,
-                          suggest_ncdu=not _sysinfo.has_ncdu())
+
+        self.ui.show_storage_scan(
+            before, mounts=mounts, scanned_path=home,
+            suggest_ncdu=not _sysinfo.has_ncdu(),
+        )
+        if not before.cleanup:
+            self.ui.success("No safe, measurable cleanup was found.")
+            self.ui.info("Large personal folders are shown for review; Novato will not delete them.")
+            return 0
+
+        self.ui.blank()
+        self.ui.info("I found these optional cleanups. Each command is separate and defaults to No.")
+        completed = 0
+        for item in before.cleanup:
+            self.ui.show_cleanup_item(item)
+            self.ui.show_command(item.command)
+            if self.dry_run:
+                continue
+            if not self.ui.confirm(item.command):
+                self.ui.info(f"Skipped {item.title.lower()}.")
+                continue
+            result = execute(
+                item.command,
+                on_line=lambda ln: self.ui.console.print(ln, markup=False),
+                note=f"storage cleanup: {item.key}",
+            )
+            if result.succeeded:
+                completed += 1
+                self.ui.success(f"Finished: {item.title}.")
+            else:
+                self.ui.warn(f"Couldn't finish {item.title.lower()} cleanly.")
+
+        if self.dry_run:
+            self.ui.info("Dry run: no cleanup commands were executed.")
+            return 0
+        if not completed:
+            self.ui.info("Nothing was changed, so your free space is unchanged.")
+            return 0
+
+        self.ui.status_line(self.config.mode, "Scanning again to verify the result...")
+        try:
+            after = _storage.deep_scan(self.system.package_manager, home)
+        except OSError:
+            self.ui.warn("Cleanup finished, but I couldn't read the final free-space value.")
+            return 0
+        self.ui.show_storage_result(before, after)
+        return 0
+
+    def _cmd_space(self) -> int:
+        """Fast, read-only answer for total, used, and available storage."""
+        home = os.path.expanduser("~")
+        try:
+            scan = _storage.capacity_scan(home)
+        except OSError:
+            self.ui.warn("Couldn't read the available storage on this system.")
+            return 1
+        self.ui.show_space(scan, distro_name=self.system.distro_name)
         return 0
 
     def _cmd_process(self, arg: str) -> int:
@@ -840,6 +895,9 @@ class App:
             "man": lambda: self._cmd_man(joined),
             "do": lambda: self._cmd_do(joined),
             "disk": self._cmd_disk,
+            "space": self._cmd_space,
+            "check": self._cmd_space,
+            "clean": self._cmd_disk,
             "process": lambda: self._cmd_process(joined),
             "learn": self._cmd_learn,
         }.get(name)
@@ -882,6 +940,8 @@ class App:
             "",
             "  INSPECT YOUR SYSTEM",
             "  /disk                                 see what's filling up your disk",
+            "  /space                                quickly show available storage",
+            "  /clean storage                        safely scan and offer cleanup",
             "  /process [port]                       see what's running / using a port",
             "",
             "  SETTINGS",
