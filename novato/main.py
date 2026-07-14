@@ -576,7 +576,10 @@ class App:
         mounts = _sysinfo.disk_mounts()
         self.ui.status_line(self.config.mode, "Deep-scanning storage (read-only)...")
         try:
-            before = _storage.deep_scan(self.system.package_manager, home)
+            before = _storage.deep_scan(
+                self.system.package_manager, home,
+                aur_helper=self.system.aur_helper,
+            )
         except OSError:
             before = None
         if before is None:
@@ -587,15 +590,46 @@ class App:
             before, mounts=mounts, scanned_path=home,
             suggest_ncdu=not _sysinfo.has_ncdu(),
         )
-        if not before.cleanup:
+        cleanup_items = list(before.cleanup)
+        review_candidates = (
+            list(before.inventory.review_candidates)
+            if before.inventory is not None else []
+        )
+        completed = 0
+        moved_to_trash = False
+        moved_bytes = 0
+
+        if review_candidates:
+            if self.dry_run:
+                self.ui.info(
+                    f"\n{len(review_candidates)} folder/file choices are available. "
+                    "Run without --dry-run to inspect them one level at a time."
+                )
+            elif self.ui.ask_yes_no(
+                "Inspect rebuildable folders, old files, SDKs, and emulators one by one?",
+                default_no=False,
+            ):
+                actions, moved_to_trash, moved_bytes = self._review_storage_candidates(
+                    review_candidates
+                )
+                completed += actions
+
+        if moved_to_trash and not any(item.key == "trash" for item in cleanup_items):
+            cleanup_items.append(_storage.CleanupItem(
+                "trash", "Trash (including your reviewed choices)",
+                "Permanently empties files you just chose. This cannot be undone.",
+                "gio trash --empty", moved_bytes,
+            ))
+
+        if not cleanup_items and not review_candidates:
             self.ui.success("No safe, measurable cleanup was found.")
             self.ui.info("Large personal folders are shown for review; Novato will not delete them.")
             return 0
 
-        self.ui.blank()
-        self.ui.info("I found these optional cleanups. Each command is separate and defaults to No.")
-        completed = 0
-        for item in before.cleanup:
+        if cleanup_items:
+            self.ui.blank()
+            self.ui.info("I found these optional cleanups. Each command is separate and defaults to No.")
+        for item in cleanup_items:
             self.ui.show_cleanup_item(item)
             self.ui.show_command(item.command)
             if self.dry_run:
@@ -623,12 +657,63 @@ class App:
 
         self.ui.status_line(self.config.mode, "Scanning again to verify the result...")
         try:
-            after = _storage.deep_scan(self.system.package_manager, home)
+            after = _storage.deep_scan(
+                self.system.package_manager, home,
+                aur_helper=self.system.aur_helper,
+            )
         except OSError:
             self.ui.warn("Cleanup finished, but I couldn't read the final free-space value.")
             return 0
         self.ui.show_storage_result(before, after)
         return 0
+
+    def _review_storage_candidates(self, candidates) -> tuple[int, bool, int]:
+        """Let the user drill into evidence and act on only selected paths."""
+        remaining = list(candidates)
+        completed = 0
+        moved_to_trash = False
+        moved_bytes = 0
+        while remaining:
+            self.ui.show_review_candidates(remaining)
+            self.ui.info("Choose an item to inspect deeper, or 'q' to continue safely.")
+            index = self.ui.prompt_choice(len(remaining))
+            if index is None:
+                break
+            candidate = remaining[index]
+            children = []
+            if os.path.isdir(candidate.path):
+                children = _sysinfo.largest_dirs(candidate.path, limit=12, depth=1)
+            self.ui.show_review_detail(candidate, children)
+            if not candidate.command:
+                self.ui.warn(
+                    "No safely validated automatic action is available for this item. "
+                    "Novato will leave it untouched."
+                )
+                remaining.pop(index)
+                continue
+            self.ui.show_command(candidate.command)
+            if not self.ui.confirm(candidate.command):
+                self.ui.info("Kept it unchanged.")
+                remaining.pop(index)
+                continue
+            result = execute(
+                candidate.command,
+                on_line=lambda line: self.ui.console.print(line, markup=False),
+                note=f"reviewed storage action: {candidate.category}",
+            )
+            if result.succeeded:
+                completed += 1
+                this_moved = candidate.action.startswith("move")
+                moved_to_trash = moved_to_trash or this_moved
+                if this_moved:
+                    moved_bytes += candidate.size_bytes
+                self.ui.success(f"Finished: {candidate.title}.")
+                if this_moved:
+                    self.ui.info("It is in Trash for now; space returns only after Trash is emptied.")
+            else:
+                self.ui.warn(f"Couldn't finish the selected action for {candidate.title}.")
+            remaining.pop(index)
+        return completed, moved_to_trash, moved_bytes
 
     def _cmd_space(self) -> int:
         """Fast, read-only answer for total, used, and available storage."""

@@ -49,6 +49,55 @@ def test_cleanup_detects_trash_and_keeps_journal_bounded():
     assert commands["journal"] == "sudo journalctl --vacuum-size=200M"
 
 
+def test_paccache_preview_replaces_misleading_total_cache_estimate():
+    def run(command: str) -> str:
+        if command == "paccache -d -u -k 0":
+            return "finished dry run: 4 candidates (disk space saved: 512 MiB)\n"
+        if "/var/cache/pacman/pkg" in command:
+            return f"{2 * 1024**3}\t/var/cache/pacman/pkg\n"
+        return ""
+
+    items = storage.cleanup_items(
+        "pacman", "/home/u", run=run,
+        available=lambda name: f"/usr/bin/{name}" if name == "paccache" else None,
+    )
+    package = next(item for item in items if item.key == "packages")
+    assert package.estimated_bytes == 512 * 1024**2
+    assert package.command == "sudo paccache -r -u -k 0"
+
+
+def test_paccache_with_no_candidates_offers_no_package_cleanup():
+    def run(command: str) -> str:
+        if "/var/cache/pacman/pkg" in command:
+            return f"{2 * 1024**3}\t/var/cache/pacman/pkg\n"
+        return "==> no candidate packages found for pruning\n"
+
+    items = storage.cleanup_items(
+        "pacman", "/home/u", run=run,
+        available=lambda name: "/usr/bin/paccache" if name == "paccache" else None,
+    )
+    assert all(item.key != "packages" for item in items)
+
+
+def test_yay_build_cache_is_a_separate_arch_cleanup():
+    gib = 1024**3
+
+    def run(command: str) -> str:
+        if command == "yay -Pg":
+            return '{"buildDir":"/home/u/.cache/yay"}'
+        if "/home/u/.cache/yay" in command:
+            return f"{2 * gib}\t/home/u/.cache/yay\n"
+        return ""
+
+    items = storage.cleanup_items(
+        "pacman", "/home/u", aur_helper="yay", run=run,
+        available=lambda name: None,
+    )
+    aur = next(item for item in items if item.key == "aur-builds")
+    assert aur.estimated_bytes == 2 * gib
+    assert aur.command == "yay -Sc --aur"
+
+
 def test_deep_scan_reports_personal_cache_but_never_creates_delete_command(monkeypatch):
     Usage = namedtuple("Usage", "total used free")
     monkeypatch.setattr(
@@ -77,3 +126,10 @@ def test_capacity_scan_is_fast_and_read_only():
     )
     assert (scan.total_bytes, scan.used_bytes, scan.free_bytes) == (100, 60, 40)
     assert scan.cleanup == []
+
+
+def test_paccache_size_parser():
+    assert storage._paccache_saved_bytes(
+        "finished dry run (disk space saved: 1.5 GiB)"
+    ) == int(1.5 * 1024**3)
+    assert storage._paccache_saved_bytes("no candidates") == 0

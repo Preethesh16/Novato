@@ -292,6 +292,85 @@ class Presenter:
                 "[dim]Caches can contain offline files or active app data, so Novato "
                 "does not label every cache folder as safe to erase.[/]"
             )
+        if scan.notes:
+            self.console.print("\nWhat Novato understood:")
+            for note in scan.notes:
+                self.console.print(f"  • {note}")
+        if scan.system_dirs:
+            self.console.print("\nLargest system-managed areas (protected):")
+            for entry in scan.system_dirs[:8]:
+                self.console.print(f"  [bold]{entry.size:>6}[/]  {entry.path}")
+            self.console.print(
+                "[dim]These belong to Linux or installed applications. Size alone "
+                "does not make them safe cleanup targets.[/]"
+            )
+        if scan.inventory is not None:
+            self.show_storage_intelligence(scan.inventory)
+
+    def show_storage_intelligence(self, inventory) -> None:
+        """Render local evidence about importance, rebuildability, and duplicates."""
+        from .storage import format_bytes
+
+        labels = {
+            "important": ("Likely important — protected", "green"),
+            "rebuildable": ("Rebuildable data — cleanup candidate", "cyan"),
+            "review": ("Needs your judgment", "yellow"),
+        }
+        self.console.print(
+            f"\nSmart local assessment ({inventory.files_scanned:,} files and "
+            f"{inventory.dirs_scanned:,} folders inspected):"
+        )
+        for kind in ("important", "rebuildable", "review"):
+            rows = [finding for finding in inventory.findings if finding.kind == kind]
+            if not rows:
+                continue
+            title, colour = labels[kind]
+            self.console.print(f"\n[{colour}]{title}[/]:")
+            for finding in self._distinct_storage_findings(rows, limit=6):
+                self.console.print(
+                    f"  [bold]{format_bytes(finding.size_bytes):>9}[/]  {finding.path}"
+                )
+                self.console.print(f"             [dim]{finding.reason}[/]")
+
+        if inventory.largest_files:
+            self.console.print("\nLargest individual files (never auto-deleted):")
+            for finding in inventory.largest_files[:8]:
+                self.console.print(
+                    f"  [bold]{format_bytes(finding.size_bytes):>9}[/]  "
+                    f"[{labels[finding.kind][1]}]{finding.kind}[/]  {finding.path}"
+                )
+        if inventory.duplicates:
+            self.console.print("\nExact large duplicates (content hash verified):")
+            for group in inventory.duplicates[:5]:
+                self.console.print(
+                    f"  [bold]{format_bytes(group.reclaimable_bytes)} possible[/] "
+                    f"across {len(group.paths)} identical files"
+                )
+                for path in group.paths[:4]:
+                    self.console.print(f"     {path}")
+            self.console.print(
+                "[dim]Duplicates may be intentional backups; Novato only reports them.[/]"
+            )
+        if inventory.incomplete:
+            self.console.print(
+                "\n[yellow]The inventory hit its safety/time limit. Results are useful "
+                "but not a claim that every file was inspected.[/]"
+            )
+
+    @staticmethod
+    def _distinct_storage_findings(rows, *, limit: int):
+        """Prefer useful parent summaries over double-counted nested paths."""
+        selected = []
+        for finding in sorted(
+            rows, key=lambda row: (len(row.path.rstrip("/").split("/")), -row.size_bytes),
+        ):
+            path = finding.path.rstrip("/")
+            if any(path == parent or path.startswith(parent + "/")
+                   for parent in (item.path.rstrip("/") for item in selected)):
+                continue
+            selected.append(finding)
+        selected.sort(key=lambda row: row.size_bytes, reverse=True)
+        return selected[:limit]
 
     def show_cleanup_item(self, item) -> None:
         """Explain one cleanup candidate and its measured upper-bound saving."""
@@ -304,16 +383,76 @@ class Presenter:
         )
         self.console.print(f"  {item.description}")
 
+    def show_review_candidates(self, candidates) -> None:
+        """Show the interactive folder/file drill-down menu."""
+        from rich.table import Table
+        from .storage import format_bytes
+
+        table = Table(
+            title="🔎 Inspect deeper — choose a folder or file",
+            header_style="bold", border_style="dim", expand=False,
+        )
+        table.add_column("#", style="bold cyan", justify="right")
+        table.add_column("Size", justify="right")
+        table.add_column("Age")
+        table.add_column("Type")
+        table.add_column("Path", overflow="fold")
+        for index, candidate in enumerate(candidates, start=1):
+            age = f"~{candidate.age_days}d" if candidate.age_days is not None else "unknown"
+            table.add_row(
+                str(index), format_bytes(candidate.size_bytes), age,
+                candidate.category, candidate.path,
+            )
+        self.console.print()
+        self.console.print(table)
+
+    def show_review_detail(self, candidate, children=()) -> None:
+        """Explain why a selected path is present and show its next level."""
+        from .storage import format_bytes
+
+        self.console.print()
+        self.console.print(f"[bold cyan]{candidate.title}[/]")
+        self.console.print(f"  Path:   {candidate.path}")
+        self.console.print(f"  Size:   {format_bytes(candidate.size_bytes)}")
+        if candidate.age_days is not None:
+            self.console.print(f"  Age:    newest content modified about {candidate.age_days} days ago")
+        self.console.print(f"  Why:    {candidate.reason}")
+        self.console.print(f"  Action: {candidate.action}")
+        if children:
+            self.console.print("\n  Inside this folder:")
+            for child in children:
+                self.console.print(f"    [bold]{child.size:>6}[/]  {child.path}")
+
     def show_storage_result(self, before, after) -> None:
         """Show actual reclaimed and remaining space after the verification scan."""
         from .storage import format_bytes
 
-        recovered = max(0, after.free_bytes - before.free_bytes)
+        before_fs = {entry.device: entry for entry in before.filesystems}
+        changes = []
+        for current in after.filesystems:
+            previous = before_fs.get(current.device)
+            if previous is None:
+                continue
+            changes.append((current, max(0, current.free_bytes - previous.free_bytes)))
+        # Backward-compatible fallback for injected/older scan snapshots.
+        recovered = sum(change for _, change in changes) if changes else max(
+            0, after.free_bytes - before.free_bytes,
+        )
         self.console.print()
-        self.success(f"Recovered {format_bytes(recovered)}.")
+        if recovered:
+            self.success(f"Recovered {format_bytes(recovered)}.")
+        else:
+            self.warn("The commands finished, but no measurable space was recovered.")
+        if len(changes) > 1:
+            for capacity, change in changes:
+                label = "Home (/home)" if capacity.path != "/" else "System (/)"
+                self.console.print(
+                    f"  {label}: +{format_bytes(change)}, "
+                    f"{format_bytes(capacity.free_bytes)} free"
+                )
         self.console.print(
             f"Free space now: [bold green]{format_bytes(after.free_bytes)}[/] "
-            f"of {format_bytes(after.total_bytes)}."
+            f"of {format_bytes(after.total_bytes)} on your home filesystem."
         )
 
     def show_space(self, scan, *, distro_name: str = "") -> None:

@@ -427,6 +427,25 @@ novato /process 8080       # what's holding port 8080
 novato "what's using port 8080"  # same thing, in plain English
 ```
 
+On Arch, Novato previews `paccache` to calculate only genuinely pruneable
+package archives. It explains current/rollback installers without falsely
+counting them as removable, offers `yay` build sources separately, and measures
+recovered space on `/` and `/home` independently.
+
+The smart assessment walks your home filesystem locally and classifies data by
+evidence: source repositories, personal folders, configuration, cache/build
+conventions, file type, age, and exact duplicate hashes. It discovers generated
+folders even deep inside projects and never follows symlinks or crosses onto a
+different mounted filesystem. Important and uncertain data is reported but
+never automatically deleted, and no path or hash is sent to an online model.
+
+The scan then asks whether you want to inspect candidates one by one. Its menu
+includes old virtual environments, `node_modules`, build output, application
+caches, old archives, exact duplicate copies, Android SDK packages/system
+images, and AVD emulators. Selecting an entry shows one folder level deeper and
+asks before acting. Files/folders go to Trash first; Android items use their
+official manager command. Emptying Trash remains a separate irreversible prompt.
+
 `/process` lets you pick a program and stop it — always with a confirmation
 first, never automatically.
 

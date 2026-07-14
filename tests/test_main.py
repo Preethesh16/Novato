@@ -299,19 +299,25 @@ def test_storage_phrases_route_to_disk(
 
 
 def test_disk_cleanup_confirms_command_and_rescans(
-    arch_system, isolated_home, monkeypatch
+    arch_system, isolated_home, monkeypatch, capsys
 ):
     import novato.main as mainmod
     from novato.executor import ExecResult
-    from novato.storage import CleanupItem, StorageScan
+    from novato.storage import CleanupItem, DiskCapacity, StorageScan
 
     cleanup = CleanupItem(
         "packages", "Downloaded package cache", "Old installers.",
         "sudo pacman -Sc", 500,
     )
     scans = iter([
-        StorageScan(10_000, 7_000, 3_000, cleanup=[cleanup]),
-        StorageScan(10_000, 6_500, 3_500),
+        StorageScan(10_000, 7_000, 3_000, cleanup=[cleanup], filesystems=[
+            DiskCapacity("/home/u", 10_000, 7_000, 3_000, "home"),
+            DiskCapacity("/", 20_000, 15_000, 5_000, "root"),
+        ]),
+        StorageScan(10_000, 7_000, 3_000, filesystems=[
+            DiskCapacity("/home/u", 10_000, 7_000, 3_000, "home"),
+            DiskCapacity("/", 20_000, 14_500, 5_500, "root"),
+        ]),
     ])
     monkeypatch.setattr(mainmod._storage, "deep_scan", lambda *a, **k: next(scans))
     monkeypatch.setattr(mainmod._sysinfo, "disk_mounts", lambda: [])
@@ -326,6 +332,7 @@ def test_disk_cleanup_confirms_command_and_rescans(
     app = _scripted_app(arch_system, ["y"], monkeypatch)
     assert app._cmd_disk() == 0
     assert called == ["sudo pacman -Sc"]
+    assert "Recovered 500 B" in capsys.readouterr().out
 
 
 def test_disk_cleanup_dry_run_only_shows_commands(
@@ -348,6 +355,33 @@ def test_disk_cleanup_dry_run_only_shows_commands(
 
     app = _scripted_app(arch_system, ["y"], monkeypatch, dry_run=True)
     assert app._cmd_disk() == 0
+
+
+def test_folder_review_requires_selection_and_confirmation(
+    arch_system, isolated_home, monkeypatch
+):
+    import novato.main as mainmod
+    from novato.executor import ExecResult
+    from novato.storage_analyzer import ReviewCandidate
+
+    command = "gio trash /home/u/project/.venv"
+    candidate = ReviewCandidate(
+        "Python environment", "/home/u/project/.venv", 500_000_000,
+        "rebuildable folder", "Generated dependencies.", command,
+        "move to Trash", 180,
+    )
+    called = []
+    monkeypatch.setattr(
+        mainmod, "execute",
+        lambda cmd, **kwargs: called.append(cmd)
+        or ExecResult(cmd, 0, executed=True),
+    )
+    app = _scripted_app(arch_system, ["1", "y"], monkeypatch)
+    completed, moved, moved_bytes = app._review_storage_candidates([candidate])
+    assert completed == 1
+    assert moved is True
+    assert moved_bytes == 500_000_000
+    assert called == [command]
 
 
 def test_slash_cheat_known_and_unknown(arch_system, isolated_home):
