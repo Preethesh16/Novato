@@ -384,6 +384,18 @@ def test_folder_review_requires_selection_and_confirmation(
     assert called == [command]
 
 
+def test_reviewed_trash_estimate_includes_existing_trash():
+    from novato import storage
+
+    existing = storage.CleanupItem(
+        "trash", "Trash", "Existing files", "gio trash --empty", 100,
+    )
+    updated = App._include_reviewed_trash([existing], 250)
+    assert len(updated) == 1
+    assert updated[0].estimated_bytes == 350
+    assert "reviewed choices" in updated[0].title
+
+
 def test_slash_cheat_known_and_unknown(arch_system, isolated_home):
     app = App(system=arch_system, config=cfgmod.Config(),
               presenter=Presenter(input_fn=lambda p: ""))

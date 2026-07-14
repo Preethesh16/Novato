@@ -614,12 +614,8 @@ class App:
                 )
                 completed += actions
 
-        if moved_to_trash and not any(item.key == "trash" for item in cleanup_items):
-            cleanup_items.append(_storage.CleanupItem(
-                "trash", "Trash (including your reviewed choices)",
-                "Permanently empties files you just chose. This cannot be undone.",
-                "gio trash --empty", moved_bytes,
-            ))
+        if moved_to_trash:
+            cleanup_items = self._include_reviewed_trash(cleanup_items, moved_bytes)
 
         if not cleanup_items and not review_candidates:
             self.ui.success("No safe, measurable cleanup was found.")
@@ -714,6 +710,27 @@ class App:
                 self.ui.warn(f"Couldn't finish the selected action for {candidate.title}.")
             remaining.pop(index)
         return completed, moved_to_trash, moved_bytes
+
+    @staticmethod
+    def _include_reviewed_trash(cleanup_items, moved_bytes: int):
+        """Merge newly reviewed paths into the later Trash estimate."""
+        items = list(cleanup_items)
+        existing = next(
+            (index for index, item in enumerate(items) if item.key == "trash"),
+            None,
+        )
+        previous_bytes = items[existing].estimated_bytes if existing is not None else 0
+        reviewed = _storage.CleanupItem(
+            "trash", "Trash (including your reviewed choices)",
+            "Permanently empties existing Trash and files you just chose. "
+            "This cannot be undone.",
+            "gio trash --empty", previous_bytes + moved_bytes,
+        )
+        if existing is None:
+            items.append(reviewed)
+        else:
+            items[existing] = reviewed
+        return items
 
     def _cmd_space(self) -> int:
         """Fast, read-only answer for total, used, and available storage."""
