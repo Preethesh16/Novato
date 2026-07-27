@@ -21,11 +21,13 @@ def test_cleanup_commands_are_distro_aware():
         "/var/cache/pacman/pkg": 1000,
         "/var/cache/apt/archives": 2000,
         "/var/cache/dnf": 3000,
+        "/var/cache/zypp/packages": 4000,
     }
     expected = {
         "pacman": "sudo pacman -Sc",
         "apt": "sudo apt clean",
         "dnf": "sudo dnf clean packages",
+        "zypper": "sudo zypper clean --all",
     }
     for manager, command in expected.items():
         items = storage.cleanup_items(

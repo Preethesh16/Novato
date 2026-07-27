@@ -1,8 +1,8 @@
 # Novato Build Progress
 
-## Status: COMPLETE
-## Last Updated: 2026-06-10
-## Current Prompt: 4 (Phases 4 & 5 — Slash Commands, Packaging)
+## Status: CORE COMPLETE — DAILY-DRIVER WORK IN PROGRESS
+## Last Updated: 2026-07-27
+## Current focus: Trust, smart storage, diagnostics, and daily Linux workflows
 
 ---
 
@@ -53,7 +53,7 @@
 
 ## 🔄 In Progress
 
-- [ ] (none — all five phases complete)
+- [ ] Daily-driver work tracked in [`ROADMAP.md`](ROADMAP.md)
 
 ### Post-completion additions
 - [x] `downloader.py` — automatic llamafile model download: RAM-based selection

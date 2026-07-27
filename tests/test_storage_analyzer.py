@@ -140,6 +140,27 @@ def test_smart_ranking_prefers_large_safe_cache_over_old_personal_archive(
     assert inventory.review_candidates[0].recommended is True
 
 
+def test_generic_app_cache_requires_review_instead_of_recommendation(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        storage_analyzer.shutil, "which",
+        lambda name: "/usr/bin/gio" if name == "gio" else None,
+    )
+    offline_data = tmp_path / ".cache" / "browser" / "offline-session.bin"
+    offline_data.parent.mkdir(parents=True)
+    with open(offline_data, "wb") as handle:
+        handle.truncate(30 * 1024**2)
+
+    inventory = analyze_home(str(tmp_path), [], max_seconds=5)
+    candidate = next(
+        item for item in inventory.review_candidates
+        if item.path == str(tmp_path / ".cache" / "browser")
+    )
+    assert candidate.category == "rebuildable folder"
+    assert candidate.recommended is False
+
+
 @pytest.mark.parametrize("relative", [
     ".npmrc",
     ".yarnrc.yml",

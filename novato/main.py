@@ -627,10 +627,12 @@ class App:
                 "Inspect rebuildable folders, old files, SDKs, and emulators one by one?",
                 default_no=False,
             ):
-                actions, moved_to_trash, moved_bytes = self._review_storage_candidates(
+                actions, moved, reclaimed = self._review_storage_candidates(
                     review_candidates
                 )
                 completed += actions
+                moved_to_trash = moved_to_trash or moved
+                moved_bytes += reclaimed
 
         if moved_to_trash:
             cleanup_items = self._include_reviewed_trash(cleanup_items, moved_bytes)
@@ -1030,6 +1032,14 @@ class App:
         rest = parts[1:]                       # preserves case (paths, filenames)
         arg = rest[0].lower() if rest else ""  # for simple single-word commands
         joined = " ".join(rest)                # for free-text task commands
+        if name in {"clean", "check"}:
+            allowed = {"storage", "space", "disk"}
+            if len(rest) != 1 or arg not in allowed:
+                self.ui.warn(
+                    f"Use /{name} storage. Novato will not guess what "
+                    f"'{joined or name}' means here."
+                )
+                return 1
         handler = {
             "status": self._cmd_status,
             "help": self._cmd_help,

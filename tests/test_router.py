@@ -49,9 +49,11 @@ class _FakeSession:
     def __init__(self, resp):
         self._resp = resp
         self.calls = 0
+        self.payloads = []
 
     def post(self, url, json=None, headers=None, timeout=None):
         self.calls += 1
+        self.payloads.append(json)
         return self._resp
 
 
@@ -89,6 +91,41 @@ def test_groq_error_analysis_blocks_destructive_fix():
     correction = backend.analyze_error(ctx)
     assert correction is not None
     assert correction.fix == ""  # destructive fix removed
+
+
+def test_groq_error_analysis_never_sends_sensitive_failure_context():
+    session = _FakeSession(
+        _FakeResp(
+            200,
+            {"choices": [{"message": {"content":
+                '{"title":"missing","reason":"bad path","fix":""}'}}]},
+        )
+    )
+    backend = GroqBackend("fake-key", session=session)
+    command = (
+        "curl -H 'Authorization: Bearer super-secret-token' "
+        "file:///home/alice/private/report.txt"
+    )
+    stderr = (
+        "permission denied for /home/alice/private/report.txt; "
+        "token=super-secret-token user=alice"
+    )
+
+    correction = backend.analyze_error(
+        ErrorContext(command=command, exit_code=126, stderr=stderr)
+    )
+
+    assert correction is not None
+    outbound = str(session.payloads[0])
+    for sensitive in (
+        command,
+        stderr,
+        "/home/alice/private/report.txt",
+        "super-secret-token",
+        "alice",
+    ):
+        assert sensitive not in outbound
+    assert "Failure category: permission denied" in outbound
 
 
 def test_groq_http_error_returns_empty():

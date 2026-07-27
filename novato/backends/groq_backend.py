@@ -46,8 +46,8 @@ _INTENT_SYSTEM_PROMPT = (
 )
 
 _ERROR_SYSTEM_PROMPT = (
-    "You are a friendly Linux mentor for absolute beginners. Given a failed "
-    "shell command and its error output, reply with ONLY a JSON object: "
+    "You are a friendly Linux mentor for absolute beginners. Given a "
+    "privacy-safe failure category and exit code, reply with ONLY a JSON object: "
     '{"title": "...", "reason": "...", "fix": "..."} where title is a short '
     "summary, reason is a 1-2 sentence plain-English explanation assuming zero "
     "Linux knowledge, and fix is a single safe command to run (or empty string "
@@ -63,6 +63,40 @@ _TASK_SYSTEM_PROMPT = (
     "not rely on one keyword. A request to install software is always none, even "
     "when the software relates to disks. Never invent another action."
 )
+
+_ERROR_CATEGORIES = (
+    ("command not found", "command not found"),
+    ("permission denied", "permission denied"),
+    ("operation not permitted", "operation not permitted"),
+    ("no such file or directory", "file or directory not found"),
+    ("not enough space", "disk full"),
+    ("no space left on device", "disk full"),
+    ("could not resolve host", "DNS resolution failed"),
+    ("temporary failure in name resolution", "DNS resolution failed"),
+    ("connection refused", "connection refused"),
+    ("connection timed out", "connection timed out"),
+    ("authentication failed", "authentication failed"),
+    ("unauthorized", "authentication failed"),
+    ("dependency", "dependency problem"),
+    ("conflict", "package conflict"),
+)
+
+
+def _privacy_safe_error_summary(stderr: str, exit_code: int) -> str:
+    """Return a useful error classification without copying user-controlled text.
+
+    Error output routinely embeds commands, paths, usernames, credentials, and
+    arbitrary secret values.  Consequently no substring of it is sent online:
+    only locally matched, hard-coded categories and the numeric exit status are
+    included.
+    """
+    lowered = stderr.lower()
+    category = "unclassified command failure"
+    for marker, safe_category in _ERROR_CATEGORIES:
+        if marker in lowered:
+            category = safe_category
+            break
+    return f"Failure category: {category}\nExit code: {int(exit_code)}"
 
 
 class GroqBackend:
@@ -151,7 +185,9 @@ class GroqBackend:
         from .. import rules as _rules
         from .. import safety as _safety
 
-        user = f"Command: {ctx.command}\nExit code: {ctx.exit_code}\nError:\n{ctx.stderr}"
+        # Never send raw failure context online. Both the command and stderr can
+        # contain paths, usernames, tokens, or other secrets.
+        user = _privacy_safe_error_summary(ctx.stderr, ctx.exit_code)
         text = self._chat(_ERROR_SYSTEM_PROMPT, user)
         if not text:
             return None

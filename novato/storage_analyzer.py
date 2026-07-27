@@ -480,16 +480,18 @@ def _candidate_priority(item: ReviewCandidate) -> tuple[int, int, int]:
 
 
 def _is_download_cache_root(path: str, home: str) -> bool:
-    """True only for cache roots, never project dependencies or build output."""
+    """True only for structurally known download caches.
+
+    A generic ``~/.cache/<app>`` directory is intentionally excluded: browsers,
+    media apps, and offline-first tools can keep useful session/offline data
+    there even though the directory is named "cache".
+    """
     try:
         relative = Path(os.path.realpath(path)).relative_to(os.path.realpath(home))
     except ValueError:
         return False
     lowered = [part.lower() for part in relative.parts]
-    return (
-        (len(lowered) == 2 and lowered[0] == ".cache" and lowered[1] != "yay")
-        or _matching_cache_root(lowered) == len(lowered)
-    )
+    return _matching_cache_root(lowered) == len(lowered)
 
 
 def _actionable_generated(path: str, home: str) -> bool:

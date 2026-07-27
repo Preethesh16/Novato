@@ -77,6 +77,7 @@ _PACKAGE_CACHES = {
     "pacman": ("/var/cache/pacman/pkg", "sudo pacman -Sc"),
     "apt": ("/var/cache/apt/archives", "sudo apt clean"),
     "dnf": ("/var/cache/dnf", "sudo dnf clean packages"),
+    "zypper": ("/var/cache/zypp/packages", "sudo zypper clean --all"),
 }
 
 

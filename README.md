@@ -179,9 +179,10 @@ Ubuntu/Debian, or Fedora, then:
 4. scans again and reports the actual space recovered and space remaining.
 
 The cleanup is ranked rather than dumped as a folder list: Novato first builds
-a high-confidence plan from the largest downloaded/regeneratable caches, then
-keeps SDKs, build trees, duplicates, archives, models, projects, and personal
-files in a separate judgment-required review tier.
+a high-confidence plan from structurally known developer download caches, then
+keeps generic application caches, SDKs, build trees, duplicates, archives,
+models, projects, and personal files in a separate judgment-required review
+tier.
 
 On Arch, Novato uses `paccache`'s read-only preview when available, so it only
 quotes package archives that can really be pruned instead of the entire pacman

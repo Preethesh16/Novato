@@ -298,6 +298,53 @@ def test_storage_phrases_route_to_disk(
     assert routed["disk"] is True
 
 
+@pytest.mark.parametrize("command", [
+    ["/clean", "code"],
+    ["/clean"],
+    ["/check", "updates"],
+    ["/check"],
+])
+def test_storage_slash_commands_reject_unrelated_or_missing_targets(
+    command, arch_system, isolated_home, monkeypatch
+):
+    import novato.main as mainmod
+
+    monkeypatch.setattr(
+        mainmod._storage, "deep_scan",
+        lambda *a, **k: pytest.fail("invalid slash command entered cleanup"),
+    )
+    monkeypatch.setattr(
+        mainmod._storage, "capacity_scan",
+        lambda *a, **k: pytest.fail("invalid slash command entered space check"),
+    )
+    app = _scripted_app(arch_system, [], monkeypatch)
+    assert app.slash(command) == 1
+
+
+@pytest.mark.parametrize("command", [
+    ["/clean", "storage"],
+    ["/check", "space"],
+])
+def test_storage_slash_commands_accept_explicit_targets(
+    command, arch_system, isolated_home, monkeypatch
+):
+    import novato.main as mainmod
+    from novato.storage import StorageScan
+
+    monkeypatch.setattr(
+        mainmod._storage, "deep_scan",
+        lambda *a, **k: StorageScan(10_000, 7_000, 3_000),
+    )
+    monkeypatch.setattr(
+        mainmod._storage, "capacity_scan",
+        lambda *a, **k: StorageScan(10_000, 7_000, 3_000),
+    )
+    monkeypatch.setattr(mainmod._sysinfo, "disk_mounts", lambda: [])
+    monkeypatch.setattr(mainmod._sysinfo, "has_ncdu", lambda: True)
+    app = _scripted_app(arch_system, [], monkeypatch, dry_run=True)
+    assert app.slash(command) == 0
+
+
 def test_disk_cleanup_confirms_command_and_rescans(
     arch_system, isolated_home, monkeypatch, capsys
 ):
@@ -415,6 +462,58 @@ def test_smart_cleanup_guides_recommended_caches_largest_first(
     )
     assert (completed, moved, moved_bytes) == (1, True, 800_000_000)
     assert called == ["gio trash /home/u/.npm/_cacache"]
+
+
+def test_disk_cleanup_accumulates_recommended_and_reviewed_trash(
+    arch_system, isolated_home, monkeypatch
+):
+    import novato.main as mainmod
+    from novato.executor import ExecResult
+    from novato.storage import CleanupItem, StorageScan
+    from novato.storage_analyzer import Inventory, ReviewCandidate
+
+    recommended = ReviewCandidate(
+        "npm", "/home/u/.npm/_cacache", 200, "download cache",
+        "Regeneratable.", "gio trash /home/u/.npm/_cacache",
+        "move to Trash", recommended=True,
+    )
+    reviewed = ReviewCandidate(
+        "Python environment", "/home/u/project/.venv", 300,
+        "rebuildable folder", "Generated dependencies.",
+        "gio trash /home/u/project/.venv", "move to Trash",
+    )
+    before = StorageScan(
+        10_000, 7_000, 3_000,
+        cleanup=[CleanupItem(
+            "trash", "Trash", "Existing files.", "gio trash --empty", 100,
+        )],
+        inventory=Inventory(review_candidates=[recommended, reviewed]),
+    )
+    after = StorageScan(10_000, 6_500, 3_500, inventory=Inventory())
+    scans = iter([before, after])
+    monkeypatch.setattr(
+        mainmod._storage, "deep_scan", lambda *args, **kwargs: next(scans)
+    )
+    monkeypatch.setattr(mainmod._sysinfo, "disk_mounts", lambda: [])
+    monkeypatch.setattr(mainmod._sysinfo, "has_ncdu", lambda: True)
+    monkeypatch.setattr(
+        mainmod, "execute",
+        lambda command, **kwargs: ExecResult(command, 0, executed=True),
+    )
+
+    app = _scripted_app(
+        arch_system,
+        ["y", "y", "y", "1", "y", "n"],
+        monkeypatch,
+    )
+    shown = []
+    monkeypatch.setattr(
+        app.ui, "show_cleanup_item", lambda item: shown.append(item)
+    )
+
+    assert app._cmd_disk() == 0
+    trash = next(item for item in shown if item.key == "trash")
+    assert trash.estimated_bytes == 600
 
 
 def test_reviewed_trash_estimate_includes_existing_trash():
