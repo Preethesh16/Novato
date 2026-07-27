@@ -178,6 +178,11 @@ Ubuntu/Debian, or Fedora, then:
 3. explains and shows every cleanup command, asking `y/N` separately for each;
 4. scans again and reports the actual space recovered and space remaining.
 
+The cleanup is ranked rather than dumped as a folder list: Novato first builds
+a high-confidence plan from the largest downloaded/regeneratable caches, then
+keeps SDKs, build trees, duplicates, archives, models, projects, and personal
+files in a separate judgment-required review tier.
+
 On Arch, Novato uses `paccache`'s read-only preview when available, so it only
 quotes package archives that can really be pruned instead of the entire pacman
 cache. A detected `yay` build directory is explained and offered separately via
@@ -191,7 +196,8 @@ The deep scan is distro-independent: it walks the home filesystem without
 following symlinks or crossing mounts, inspects modification age and file type,
 recognises source repositories and configuration as important, aggregates
 generated trees such as `node_modules`, virtual environments, Gradle caches,
-and compiler output, and content-hashes same-sized large files before reporting
+NPM/NPX, Yarn Berry, Cargo registry/git caches, and compiler output, and
+content-hashes same-sized large files before reporting
 them as duplicates. It also inventories the root filesystem separately and
 protects system-managed areas. File paths and hashes never leave the machine.
 

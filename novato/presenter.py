@@ -383,6 +383,24 @@ class Presenter:
         )
         self.console.print(f"  {item.description}")
 
+    def show_smart_cleanup_plan(self, candidates, planned_bytes: int) -> None:
+        """Summarize the high-confidence, high-return tier before prompting."""
+        from .storage import format_bytes
+
+        self.console.print()
+        self.console.print(
+            f"[bold cyan]Recommended cleanup plan[/] — up to "
+            f"[bold]{format_bytes(planned_bytes)}[/]"
+        )
+        self.console.print(
+            "[dim]These are downloaded/regeneratable caches, ranked by space saved. "
+            "Configuration, projects, SDKs, models, and personal files are excluded.[/]"
+        )
+        for candidate in candidates:
+            self.console.print(
+                f"  [bold]{format_bytes(candidate.size_bytes):>9}[/]  {candidate.path}"
+            )
+
     def show_review_candidates(self, candidates) -> None:
         """Show the interactive folder/file drill-down menu."""
         from rich.table import Table
@@ -396,12 +414,15 @@ class Presenter:
         table.add_column("Size", justify="right")
         table.add_column("Age")
         table.add_column("Type")
+        table.add_column("Advice")
         table.add_column("Path", overflow="fold")
         for index, candidate in enumerate(candidates, start=1):
             age = f"~{candidate.age_days}d" if candidate.age_days is not None else "unknown"
             table.add_row(
                 str(index), format_bytes(candidate.size_bytes), age,
-                candidate.category, candidate.path,
+                candidate.category,
+                "recommended" if candidate.recommended else "review",
+                candidate.path,
             )
         self.console.print()
         self.console.print(table)

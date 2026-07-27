@@ -86,6 +86,75 @@ def test_analyzer_aggregates_nested_build_artifacts(tmp_path):
     assert generated.size_bytes == 30 * 1024**2
 
 
+@pytest.mark.parametrize("relative", [
+    ".npm/_cacache/content-v2/blob",
+    ".npm/_npx/job/node_modules/tool/index.js",
+    ".yarn/berry/cache/library.zip",
+    ".cargo/registry/cache/crate.tar.gz",
+    ".cargo/git/db/repository/objects/pack",
+    ".gradle/wrapper/dists/gradle/bin/gradle",
+])
+def test_analyzer_finds_cross_distro_ecosystem_caches(tmp_path, relative):
+    cached = tmp_path / relative
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    with open(cached, "wb") as handle:
+        handle.truncate(30 * 1024**2)
+
+    inventory = analyze_home(str(tmp_path), [], max_seconds=5)
+    candidates = {item.path: item for item in inventory.review_candidates}
+    expected_roots = {
+        ".npm/_cacache/content-v2/blob": ".npm/_cacache",
+        ".npm/_npx/job/node_modules/tool/index.js": ".npm/_npx",
+        ".yarn/berry/cache/library.zip": ".yarn/berry/cache",
+        ".cargo/registry/cache/crate.tar.gz": ".cargo/registry/cache",
+        ".cargo/git/db/repository/objects/pack": ".cargo/git/db",
+        ".gradle/wrapper/dists/gradle/bin/gradle": ".gradle/wrapper/dists",
+    }
+    root = str(tmp_path / expected_roots[relative])
+    assert candidates[root].category == "download cache"
+    assert candidates[root].action == "move to Trash"
+    assert candidates[root].recommended is True
+
+
+def test_smart_ranking_prefers_large_safe_cache_over_old_personal_archive(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        storage_analyzer.shutil, "which",
+        lambda name: "/usr/bin/gio" if name == "gio" else None,
+    )
+    cache = tmp_path / ".npm" / "_cacache" / "blob"
+    cache.parent.mkdir(parents=True)
+    with open(cache, "wb") as handle:
+        handle.truncate(30 * 1024**2)
+    archive = tmp_path / "Downloads" / "old.zip"
+    archive.parent.mkdir()
+    archive.write_bytes(b"old")
+    old = 100 * 86400
+    os.utime(archive, (archive.stat().st_atime - old, archive.stat().st_mtime - old))
+
+    inventory = analyze_home(
+        str(tmp_path), [], duplicate_min_bytes=100 * 1024**2, max_seconds=5,
+    )
+    assert inventory.review_candidates[0].path == str(tmp_path / ".npm" / "_cacache")
+    assert inventory.review_candidates[0].recommended is True
+
+
+@pytest.mark.parametrize("relative", [
+    ".npmrc",
+    ".yarnrc.yml",
+    ".cargo/config.toml",
+    ".gradle/gradle.properties",
+])
+def test_ecosystem_configuration_is_never_a_cleanup_candidate(tmp_path, relative):
+    configured = tmp_path / relative
+    configured.parent.mkdir(parents=True, exist_ok=True)
+    configured.write_text("important=true")
+
+    inventory = analyze_home(str(tmp_path), [], duplicate_min_bytes=1)
+    assert all(item.path != str(configured) for item in inventory.review_candidates)
+
+
 def test_analyzer_creates_reversible_folder_review_action(tmp_path, monkeypatch):
     monkeypatch.setattr(
         storage_analyzer.shutil, "which",

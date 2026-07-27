@@ -595,9 +595,27 @@ class App:
             list(before.inventory.review_candidates)
             if before.inventory is not None else []
         )
+        recommended = [item for item in review_candidates if item.recommended]
+        review_candidates = [item for item in review_candidates if not item.recommended]
         completed = 0
         moved_to_trash = False
         moved_bytes = 0
+
+        if recommended and not self.dry_run:
+            planned = sum(item.size_bytes for item in recommended)
+            self.ui.show_smart_cleanup_plan(recommended, planned)
+            if self.ui.ask_yes_no(
+                "Start the recommended cache cleanup? You still approve every item.",
+                default_no=False,
+            ):
+                actions, moved, reclaimed = self._offer_recommended_storage_candidates(
+                    recommended
+                )
+                completed += actions
+                moved_to_trash = moved_to_trash or moved
+                moved_bytes += reclaimed
+        elif recommended:
+            review_candidates = [*recommended, *review_candidates]
 
         if review_candidates:
             if self.dry_run:
@@ -617,7 +635,7 @@ class App:
         if moved_to_trash:
             cleanup_items = self._include_reviewed_trash(cleanup_items, moved_bytes)
 
-        if not cleanup_items and not review_candidates:
+        if not cleanup_items and not review_candidates and not recommended:
             self.ui.success("No safe, measurable cleanup was found.")
             self.ui.info("Large personal folders are shown for review; Novato will not delete them.")
             return 0
@@ -662,6 +680,32 @@ class App:
             return 0
         self.ui.show_storage_result(before, after)
         return 0
+
+    def _offer_recommended_storage_candidates(
+        self, candidates,
+    ) -> tuple[int, bool, int]:
+        """Guide high-confidence cache wins directly, largest first."""
+        completed = 0
+        moved_bytes = 0
+        for candidate in candidates:
+            self.ui.show_review_detail(candidate)
+            self.ui.show_command(candidate.command)
+            if not self.ui.confirm(candidate.command):
+                self.ui.info(f"Kept {candidate.title} unchanged.")
+                continue
+            result = execute(
+                candidate.command,
+                on_line=lambda line: self.ui.console.print(line, markup=False),
+                note="smart storage cleanup: download cache",
+            )
+            if result.succeeded:
+                completed += 1
+                moved_bytes += candidate.size_bytes
+                self.ui.success(f"Finished: {candidate.title}.")
+                self.ui.info("It is in Trash for now; Novato will offer to empty it.")
+            else:
+                self.ui.warn(f"Couldn't clean {candidate.title}.")
+        return completed, bool(completed), moved_bytes
 
     def _review_storage_candidates(self, candidates) -> tuple[int, bool, int]:
         """Let the user drill into evidence and act on only selected paths."""

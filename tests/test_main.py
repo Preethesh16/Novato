@@ -384,6 +384,39 @@ def test_folder_review_requires_selection_and_confirmation(
     assert called == [command]
 
 
+def test_smart_cleanup_guides_recommended_caches_largest_first(
+    arch_system, isolated_home, monkeypatch
+):
+    import novato.main as mainmod
+    from novato.executor import ExecResult
+    from novato.storage_analyzer import ReviewCandidate
+
+    candidates = [
+        ReviewCandidate(
+            "npm", "/home/u/.npm/_cacache", 800_000_000, "download cache",
+            "Regeneratable.", "gio trash /home/u/.npm/_cacache",
+            "move to Trash", recommended=True,
+        ),
+        ReviewCandidate(
+            "yarn", "/home/u/.yarn/berry/cache", 700_000_000, "download cache",
+            "Regeneratable.", "gio trash /home/u/.yarn/berry/cache",
+            "move to Trash", recommended=True,
+        ),
+    ]
+    called = []
+    monkeypatch.setattr(
+        mainmod, "execute",
+        lambda command, **kwargs: called.append(command)
+        or ExecResult(command, 0, executed=True),
+    )
+    app = _scripted_app(arch_system, ["y", "n"], monkeypatch)
+    completed, moved, moved_bytes = app._offer_recommended_storage_candidates(
+        candidates
+    )
+    assert (completed, moved, moved_bytes) == (1, True, 800_000_000)
+    assert called == ["gio trash /home/u/.npm/_cacache"]
+
+
 def test_reviewed_trash_estimate_includes_existing_trash():
     from novato import storage
 

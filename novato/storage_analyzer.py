@@ -51,6 +51,7 @@ class ReviewCandidate:
     command: str = ""
     action: str = "review"
     age_days: int | None = None
+    recommended: bool = False
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,21 @@ _ARCHIVE_SUFFIXES = frozenset({
     ".iso", ".img", ".zip", ".7z", ".rar", ".tar", ".gz", ".xz",
     ".bz2", ".zst", ".apk", ".appimage",
 })
+# Cache locations used by language/tool ecosystems independently of the Linux
+# distribution.  Only these cache subtrees are rebuildable; their parent
+# directories can also contain configuration, credentials, or installed tools.
+_ECOSYSTEM_CACHE_PATTERNS = (
+    (".npm", "_cacache"),
+    (".npm", "_npx"),
+    (".yarn", "berry", "cache"),
+    (".cargo", "registry", "cache"),
+    (".cargo", "registry", "index"),
+    (".cargo", "git", "db"),
+    (".gradle", "caches"),
+    (".gradle", "daemon"),
+    (".gradle", "native"),
+    (".gradle", "wrapper", "dists"),
+)
 
 
 def classify_path(path: str, home: str, *, is_file: bool = False,
@@ -109,6 +125,13 @@ def classify_path(path: str, home: str, *, is_file: bool = False,
     part_set = set(parts)
     name = parts[-1] if parts else ""
 
+    if _matching_cache_root(parts):
+        return (
+            REBUILDABLE,
+            "Downloaded developer-tool cache. It can be recreated when the tool "
+            "next needs it; configuration and project source are outside this folder.",
+            0.92,
+        )
     if ".cache" in part_set:
         return (
             REBUILDABLE,
@@ -278,6 +301,9 @@ def _generated_root(path: str, home: str) -> str:
         return ""
     parts = relative.parts
     lowered = [part.lower() for part in parts]
+    cache_root = _matching_cache_root(lowered)
+    if cache_root:
+        return os.path.join(home, *parts[:cache_root])
     if ".cache" in lowered:
         index = lowered.index(".cache")
         # Attribute cache usage to the application directly below ~/.cache.
@@ -301,6 +327,17 @@ def _generated_root(path: str, home: str) -> str:
         index = indexes[-1]
         return os.path.join(home, *parts[:index + 1])
     return ""
+
+
+def _matching_cache_root(parts: list[str]) -> int:
+    """Return the component count through a known ecosystem cache, else zero."""
+    lowered = [part.lower() for part in parts]
+    for pattern in _ECOSYSTEM_CACHE_PATTERNS:
+        width = len(pattern)
+        for start in range(0, len(lowered) - width + 1):
+            if tuple(lowered[start:start + width]) == pattern:
+                return start + width
+    return 0
 
 
 def _sdk_component(path: str, home: str) -> tuple[str, str, str] | None:
@@ -357,15 +394,17 @@ def _build_review_candidates(
         if finding.kind != REBUILDABLE or not _actionable_generated(finding.path, home):
             continue
         command = shlex.join([gio, "trash", finding.path]) if gio else ""
+        download_cache = _is_download_cache_root(finding.path, home)
         candidates.append(ReviewCandidate(
             title=os.path.basename(finding.path) or finding.path,
             path=finding.path,
             size_bytes=finding.size_bytes,
-            category="rebuildable folder",
+            category="download cache" if download_cache else "rebuildable folder",
             reason=finding.reason,
             command=command,
             action="move to Trash" if command else "review",
             age_days=finding.age_days,
+            recommended=bool(command and download_cache),
         ))
 
     sdkmanager = _android_tool(home, "sdkmanager")
@@ -428,10 +467,29 @@ def _build_review_candidates(
     unique: dict[str, ReviewCandidate] = {}
     for candidate in candidates:
         unique.setdefault(os.path.realpath(candidate.path), candidate)
-    return sorted(
-        unique.values(),
-        key=lambda item: (item.age_days or 0, item.size_bytes), reverse=True,
-    )[:40]
+    return sorted(unique.values(), key=_candidate_priority, reverse=True)[:40]
+
+
+def _candidate_priority(item: ReviewCandidate) -> tuple[int, int, int]:
+    """Put low-risk, high-return actions before merely old or interesting data."""
+    return (
+        1 if item.recommended else 0,
+        item.size_bytes,
+        item.age_days or 0,
+    )
+
+
+def _is_download_cache_root(path: str, home: str) -> bool:
+    """True only for cache roots, never project dependencies or build output."""
+    try:
+        relative = Path(os.path.realpath(path)).relative_to(os.path.realpath(home))
+    except ValueError:
+        return False
+    lowered = [part.lower() for part in relative.parts]
+    return (
+        (len(lowered) == 2 and lowered[0] == ".cache" and lowered[1] != "yay")
+        or _matching_cache_root(lowered) == len(lowered)
+    )
 
 
 def _actionable_generated(path: str, home: str) -> bool:
@@ -445,6 +503,8 @@ def _actionable_generated(path: str, home: str) -> bool:
     relative = Path(real_path).relative_to(real_home)
     lowered = [part.lower() for part in relative.parts]
     basename = lowered[-1] if lowered else ""
+    if _matching_cache_root(lowered) == len(lowered):
+        return True
     if len(lowered) == 2 and lowered[0] == ".cache":
         return lowered[1] != "yay"  # yay has a safer native cleanup flow.
     if basename in _BUILD_PARTS or basename in {"dist", "out"}:
