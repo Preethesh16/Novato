@@ -597,34 +597,45 @@ class App:
         )
         recommended = [item for item in review_candidates if item.recommended]
         review_candidates = [item for item in review_candidates if not item.recommended]
+        recommended_cleanup = [item for item in cleanup_items if item.key != "trash"]
+        cleanup_items = [item for item in cleanup_items if item.key == "trash"]
         completed = 0
         moved_to_trash = False
         moved_bytes = 0
+        emptied_trash = False
 
-        if recommended and not self.dry_run:
-            planned = sum(item.size_bytes for item in recommended)
-            self.ui.show_smart_cleanup_plan(recommended, planned)
+        if recommended or recommended_cleanup:
+            planned = sum(item.size_bytes for item in recommended) + sum(
+                item.estimated_bytes for item in recommended_cleanup
+            )
+            self.ui.show_smart_cleanup_plan(
+                recommended, planned, cleanup_items=recommended_cleanup,
+            )
+        if (recommended or recommended_cleanup) and not self.dry_run:
             if self.ui.ask_yes_no(
-                "Start the recommended cache cleanup? You still approve every item.",
-                default_no=False,
+                f"Run all {len(recommended) + len(recommended_cleanup)} "
+                "recommended cleanups now?",
             ):
-                actions, moved, reclaimed = self._offer_recommended_storage_candidates(
-                    recommended
+                actions, moved, reclaimed, failed_cleanup, failed_candidates = (
+                    self._execute_recommended_storage_plan(
+                        recommended_cleanup, recommended,
+                    )
                 )
                 completed += actions
                 moved_to_trash = moved_to_trash or moved
                 moved_bytes += reclaimed
-        elif recommended:
-            review_candidates = [*recommended, *review_candidates]
-
+                cleanup_items = [*failed_cleanup, *cleanup_items]
+                review_candidates = [*failed_candidates, *review_candidates]
+            else:
+                self.ui.info("Skipped the recommended cleanup plan.")
         if review_candidates:
             if self.dry_run:
                 self.ui.info(
                     f"\n{len(review_candidates)} folder/file choices are available. "
-                    "Run without --dry-run to inspect them one level at a time."
+                    "Run without --dry-run to select one or many at once."
                 )
             elif self.ui.ask_yes_no(
-                "Inspect rebuildable folders, old files, SDKs, and emulators one by one?",
+                "Review additional folders, old files, SDKs, and emulators?",
                 default_no=False,
             ):
                 actions, moved, reclaimed = self._review_storage_candidates(
@@ -635,9 +646,20 @@ class App:
                 moved_bytes += reclaimed
 
         if moved_to_trash:
-            cleanup_items = self._include_reviewed_trash(cleanup_items, moved_bytes)
+            measured_trash = _storage.directory_bytes(
+                os.path.join(home, ".local", "share", "Trash")
+            )
+            cleanup_items = self._include_reviewed_trash(
+                cleanup_items, moved_bytes, measured_bytes=measured_trash,
+            )
 
-        if not cleanup_items and not review_candidates and not recommended:
+        if (
+            not cleanup_items
+            and not review_candidates
+            and not recommended
+            and not recommended_cleanup
+            and not completed
+        ):
             self.ui.success("No safe, measurable cleanup was found.")
             self.ui.info("Large personal folders are shown for review; Novato will not delete them.")
             return 0
@@ -660,6 +682,7 @@ class App:
             )
             if result.succeeded:
                 completed += 1
+                emptied_trash = emptied_trash or item.key == "trash"
                 self.ui.success(f"Finished: {item.title}.")
             else:
                 self.ui.warn(f"Couldn't finish {item.title.lower()} cleanly.")
@@ -680,20 +703,35 @@ class App:
         except OSError:
             self.ui.warn("Cleanup finished, but I couldn't read the final free-space value.")
             return 0
+        if emptied_trash:
+            after = _storage.settle_capacity(after, home)
         self.ui.show_storage_result(before, after)
         return 0
 
-    def _offer_recommended_storage_candidates(
-        self, candidates,
-    ) -> tuple[int, bool, int]:
-        """Guide high-confidence cache wins directly, largest first."""
+    def _execute_recommended_storage_plan(
+        self, cleanup_items, candidates,
+    ) -> tuple[int, bool, int, list, list]:
+        """Execute one already-approved high-confidence cleanup plan."""
         completed = 0
         moved_bytes = 0
+        failed_cleanup = []
+        failed_candidates = []
+        for item in cleanup_items:
+            result = execute(
+                item.command,
+                on_line=lambda line: self.ui.console.print(line, markup=False),
+                note=f"recommended storage cleanup: {item.key}",
+            )
+            if result.succeeded:
+                completed += 1
+                self.ui.success(f"Finished: {item.title}.")
+            else:
+                failed_cleanup.append(item)
+                self.ui.warn(f"Couldn't finish {item.title.lower()} cleanly.")
         for candidate in candidates:
-            self.ui.show_review_detail(candidate)
-            self.ui.show_command(candidate.command)
-            if not self.ui.confirm(candidate.command):
-                self.ui.info(f"Kept {candidate.title} unchanged.")
+            if not os.path.lexists(candidate.path):
+                failed_candidates.append(candidate)
+                self.ui.warn(f"Skipped {candidate.title}: the path no longer exists.")
                 continue
             result = execute(
                 candidate.command,
@@ -706,59 +744,83 @@ class App:
                 self.ui.success(f"Finished: {candidate.title}.")
                 self.ui.info("It is in Trash for now; Novato will offer to empty it.")
             else:
+                failed_candidates.append(candidate)
                 self.ui.warn(f"Couldn't clean {candidate.title}.")
-        return completed, bool(completed), moved_bytes
+        return completed, bool(moved_bytes), moved_bytes, failed_cleanup, failed_candidates
 
     def _review_storage_candidates(self, candidates) -> tuple[int, bool, int]:
-        """Let the user drill into evidence and act on only selected paths."""
+        """Let the user select and approve multiple evidence-backed actions."""
         remaining = list(candidates)
         completed = 0
         moved_to_trash = False
         moved_bytes = 0
         while remaining:
             self.ui.show_review_candidates(remaining)
-            self.ui.info("Choose an item to inspect deeper, or 'q' to continue safely.")
-            index = self.ui.prompt_choice(len(remaining))
-            if index is None:
-                break
-            candidate = remaining[index]
-            children = []
-            if os.path.isdir(candidate.path):
-                children = _sysinfo.largest_dirs(candidate.path, limit=12, depth=1)
-            self.ui.show_review_detail(candidate, children)
-            if not candidate.command:
-                self.ui.warn(
-                    "No safely validated automatic action is available for this item. "
-                    "Novato will leave it untouched."
-                )
-                remaining.pop(index)
-                continue
-            self.ui.show_command(candidate.command)
-            if not self.ui.confirm(candidate.command):
-                self.ui.info("Kept it unchanged.")
-                remaining.pop(index)
-                continue
-            result = execute(
-                candidate.command,
-                on_line=lambda line: self.ui.console.print(line, markup=False),
-                note=f"reviewed storage action: {candidate.category}",
+            self.ui.info(
+                "Choose one or many items (example: 13 15 17), or 'q' to continue."
             )
-            if result.succeeded:
-                completed += 1
-                this_moved = candidate.action.startswith("move")
-                moved_to_trash = moved_to_trash or this_moved
-                if this_moved:
-                    moved_bytes += candidate.size_bytes
-                self.ui.success(f"Finished: {candidate.title}.")
-                if this_moved:
-                    self.ui.info("It is in Trash for now; space returns only after Trash is emptied.")
-            else:
-                self.ui.warn(f"Couldn't finish the selected action for {candidate.title}.")
-            remaining.pop(index)
+            indices = self.ui.prompt_choices(len(remaining))
+            if indices is None:
+                break
+            selected = [remaining[index] for index in indices]
+            actionable = []
+            for candidate in selected:
+                children = []
+                if os.path.isdir(candidate.path):
+                    children = _sysinfo.largest_dirs(candidate.path, limit=12, depth=1)
+                self.ui.show_review_detail(candidate, children)
+                if not candidate.command:
+                    self.ui.warn(
+                        "No safely validated automatic action is available for this "
+                        "item. Novato will leave it untouched."
+                    )
+                    continue
+                self.ui.show_command(candidate.command)
+                actionable.append(candidate)
+
+            if actionable and self.ui.ask_yes_no(
+                f"Run all {len(actionable)} selected actions?",
+            ):
+                batch_moved = False
+                for candidate in actionable:
+                    if not os.path.lexists(candidate.path):
+                        self.ui.warn(
+                            f"Skipped {candidate.title}: the path no longer exists."
+                        )
+                        continue
+                    result = execute(
+                        candidate.command,
+                        on_line=lambda line: self.ui.console.print(line, markup=False),
+                        note=f"reviewed storage action: {candidate.category}",
+                    )
+                    if result.succeeded:
+                        completed += 1
+                        this_moved = candidate.action.startswith("move")
+                        moved_to_trash = moved_to_trash or this_moved
+                        batch_moved = batch_moved or this_moved
+                        if this_moved:
+                            moved_bytes += candidate.size_bytes
+                        self.ui.success(f"Finished: {candidate.title}.")
+                    else:
+                        self.ui.warn(
+                            f"Couldn't finish the selected action for {candidate.title}."
+                        )
+                if batch_moved:
+                    self.ui.info(
+                        "Selected files are in Trash for now; space returns after "
+                        "Trash is emptied."
+                    )
+            elif actionable:
+                self.ui.info("Kept the selected items unchanged.")
+
+            for index in sorted(indices, reverse=True):
+                remaining.pop(index)
         return completed, moved_to_trash, moved_bytes
 
     @staticmethod
-    def _include_reviewed_trash(cleanup_items, moved_bytes: int):
+    def _include_reviewed_trash(
+        cleanup_items, moved_bytes: int, *, measured_bytes: int = 0,
+    ):
         """Merge newly reviewed paths into the later Trash estimate."""
         items = list(cleanup_items)
         existing = next(
@@ -770,7 +832,7 @@ class App:
             "trash", "Trash (including your reviewed choices)",
             "Permanently empties existing Trash and files you just chose. "
             "This cannot be undone.",
-            "gio trash --empty", previous_bytes + moved_bytes,
+            "gio trash --empty", measured_bytes or (previous_bytes + moved_bytes),
         )
         if existing is None:
             items.append(reviewed)

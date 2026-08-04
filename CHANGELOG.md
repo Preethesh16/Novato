@@ -10,6 +10,18 @@ and the project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Smart storage workflow
+
+- Builds one measured recommended plan for package/log/download caches, shows
+  every exact command, and runs the complete plan after one default-No approval.
+- Accepts multi-row manual choices such as `13 15 17`, comma-separated values,
+  and ranges, then previews and confirms the selected batch once.
+- Excludes Trash and overlapping parent/child paths from suggestions, protects
+  the `~/.gradle` configuration root, and safely skips paths that disappear.
+- Uses allocated blocks for reclaim estimates, remeasures Trash after moves,
+  samples capacity after the deep scan, and waits briefly for asynchronous GVFS
+  deletion before displaying final free space.
+
 ### New features — a companion for absolute beginners
 
 A new-to-Linux user has to climb a much taller wall than "which package do I

@@ -17,6 +17,17 @@ from novato import storage_analyzer
 from novato.sysinfo import DirSize
 
 
+def _allocate(path, size=30 * 1024**2):
+    """Create a file with real allocated blocks, not a sparse apparent size."""
+    with open(path, "wb") as handle:
+        if hasattr(os, "posix_fallocate"):
+            os.posix_fallocate(handle.fileno(), 0, size)
+        else:
+            chunk = b"x" * (1024 * 1024)
+            for _ in range(size // len(chunk)):
+                handle.write(chunk)
+
+
 @pytest.mark.parametrize("relative,kind", [
     ("Projects/novato", PROTECTED),
     ("Documents/report.pdf", PROTECTED),
@@ -75,8 +86,7 @@ def test_analyzer_marks_a_bounded_scan_incomplete(tmp_path):
 def test_analyzer_aggregates_nested_build_artifacts(tmp_path):
     modules = tmp_path / "Projects" / "web" / "node_modules"
     modules.mkdir(parents=True)
-    with open(modules / "dependency.bin", "wb") as handle:
-        handle.truncate(30 * 1024**2)
+    _allocate(modules / "dependency.bin")
 
     inventory = analyze_home(str(tmp_path), [], max_seconds=5)
     generated = next(
@@ -84,6 +94,57 @@ def test_analyzer_aggregates_nested_build_artifacts(tmp_path):
     )
     assert generated.kind == REBUILDABLE
     assert generated.size_bytes == 30 * 1024**2
+
+
+def test_analyzer_does_not_promise_sparse_apparent_bytes(tmp_path):
+    modules = tmp_path / "Projects" / "web" / "node_modules"
+    modules.mkdir(parents=True)
+    with open(modules / "sparse.bin", "wb") as handle:
+        handle.truncate(30 * 1024**2)
+
+    inventory = analyze_home(str(tmp_path), [], max_seconds=5)
+    assert all(item.path != str(modules) for item in inventory.review_candidates)
+
+
+def test_analyzer_counts_hardlinked_cache_blocks_once(tmp_path):
+    cache = tmp_path / ".npm" / "_cacache"
+    cache.mkdir(parents=True)
+    original = cache / "original.bin"
+    _allocate(original)
+    os.link(original, cache / "hardlink.bin")
+
+    inventory = analyze_home(str(tmp_path), [], max_seconds=5)
+    candidate = next(item for item in inventory.review_candidates
+                     if item.path == str(cache))
+    assert candidate.size_bytes == 30 * 1024**2
+
+
+def test_analyzer_does_not_count_cache_inode_linked_to_protected_data(tmp_path):
+    cache = tmp_path / ".npm" / "_cacache"
+    protected = tmp_path / "Projects" / "source"
+    cache.mkdir(parents=True)
+    protected.mkdir(parents=True)
+    original = protected / "model.bin"
+    _allocate(original)
+    os.link(original, cache / "linked-model.bin")
+
+    inventory = analyze_home(str(tmp_path), [], max_seconds=5)
+    assert all(item.path != str(cache) for item in inventory.review_candidates)
+
+
+def test_analyzer_does_not_double_count_inode_across_two_cache_roots(tmp_path):
+    npm = tmp_path / ".npm" / "_cacache"
+    yarn = tmp_path / ".yarn" / "berry" / "cache"
+    npm.mkdir(parents=True)
+    yarn.mkdir(parents=True)
+    original = npm / "shared.bin"
+    _allocate(original)
+    os.link(original, yarn / "shared.bin")
+
+    inventory = analyze_home(str(tmp_path), [], max_seconds=5)
+    paths = {item.path for item in inventory.review_candidates}
+    assert str(npm) not in paths
+    assert str(yarn) not in paths
 
 
 @pytest.mark.parametrize("relative", [
@@ -97,8 +158,7 @@ def test_analyzer_aggregates_nested_build_artifacts(tmp_path):
 def test_analyzer_finds_cross_distro_ecosystem_caches(tmp_path, relative):
     cached = tmp_path / relative
     cached.parent.mkdir(parents=True, exist_ok=True)
-    with open(cached, "wb") as handle:
-        handle.truncate(30 * 1024**2)
+    _allocate(cached)
 
     inventory = analyze_home(str(tmp_path), [], max_seconds=5)
     candidates = {item.path: item for item in inventory.review_candidates}
@@ -125,8 +185,7 @@ def test_smart_ranking_prefers_large_safe_cache_over_old_personal_archive(
     )
     cache = tmp_path / ".npm" / "_cacache" / "blob"
     cache.parent.mkdir(parents=True)
-    with open(cache, "wb") as handle:
-        handle.truncate(30 * 1024**2)
+    _allocate(cache)
     archive = tmp_path / "Downloads" / "old.zip"
     archive.parent.mkdir()
     archive.write_bytes(b"old")
@@ -149,8 +208,7 @@ def test_generic_app_cache_requires_review_instead_of_recommendation(
     )
     offline_data = tmp_path / ".cache" / "browser" / "offline-session.bin"
     offline_data.parent.mkdir(parents=True)
-    with open(offline_data, "wb") as handle:
-        handle.truncate(30 * 1024**2)
+    _allocate(offline_data)
 
     inventory = analyze_home(str(tmp_path), [], max_seconds=5)
     candidate = next(
@@ -159,6 +217,76 @@ def test_generic_app_cache_requires_review_instead_of_recommendation(
     )
     assert candidate.category == "rebuildable folder"
     assert candidate.recommended is False
+
+
+@pytest.mark.parametrize("name", [
+    "pip", "uv", "pnpm", "ms-playwright", "thumbnails", "vscode-cpptools",
+])
+def test_known_regeneratable_app_caches_are_recommended(tmp_path, monkeypatch, name):
+    monkeypatch.setattr(
+        storage_analyzer.shutil, "which",
+        lambda tool: "/usr/bin/gio" if tool == "gio" else None,
+    )
+    cached = tmp_path / ".cache" / name / "download.bin"
+    cached.parent.mkdir(parents=True)
+    _allocate(cached)
+
+    inventory = analyze_home(str(tmp_path), [], max_seconds=5)
+    candidate = next(
+        item for item in inventory.review_candidates
+        if item.path == str(tmp_path / ".cache" / name)
+    )
+    assert candidate.category == "download cache"
+    assert candidate.recommended is True
+
+
+def test_analyzer_excludes_trash_contents_from_cleanup_candidates(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        storage_analyzer.shutil, "which",
+        lambda tool: "/usr/bin/gio" if tool == "gio" else None,
+    )
+    trashed = tmp_path / ".local" / "share" / "Trash" / "files" / "node_modules"
+    trashed.mkdir(parents=True)
+    _allocate(trashed / "dependency.bin")
+
+    inventory = analyze_home(str(tmp_path), [], max_seconds=5)
+    assert all(
+        not item.path.startswith(str(tmp_path / ".local" / "share" / "Trash"))
+        for item in inventory.review_candidates
+    )
+
+
+def test_analyzer_removes_overlapping_parent_child_actions(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        storage_analyzer.shutil, "which",
+        lambda tool: "/usr/bin/gio" if tool == "gio" else None,
+    )
+    nested = tmp_path / "Projects" / "app" / "node_modules" / "lib" / "build"
+    nested.mkdir(parents=True)
+    _allocate(nested / "artifact.bin")
+
+    inventory = analyze_home(str(tmp_path), [], max_seconds=5)
+    paths = [item.path for item in inventory.review_candidates]
+    parent = str(tmp_path / "Projects" / "app" / "node_modules")
+    assert parent in paths
+    assert all(path == parent or not path.startswith(parent + os.sep) for path in paths)
+
+
+def test_home_gradle_root_is_not_offered_but_its_cache_is(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        storage_analyzer.shutil, "which",
+        lambda tool: "/usr/bin/gio" if tool == "gio" else None,
+    )
+    cached = tmp_path / ".gradle" / "caches" / "modules" / "artifact.bin"
+    cached.parent.mkdir(parents=True)
+    _allocate(cached)
+
+    inventory = analyze_home(
+        str(tmp_path), [DirSize("1G", str(tmp_path / ".gradle"))], max_seconds=5,
+    )
+    paths = {item.path for item in inventory.review_candidates}
+    assert str(tmp_path / ".gradle") not in paths
+    assert str(tmp_path / ".gradle" / "caches") in paths
 
 
 @pytest.mark.parametrize("relative", [
@@ -183,8 +311,7 @@ def test_analyzer_creates_reversible_folder_review_action(tmp_path, monkeypatch)
     )
     modules = tmp_path / "Projects" / "web" / "node_modules"
     modules.mkdir(parents=True)
-    with open(modules / "dependency.bin", "wb") as handle:
-        handle.truncate(30 * 1024**2)
+    _allocate(modules / "dependency.bin")
 
     inventory = analyze_home(str(tmp_path), [], max_seconds=5)
     candidate = next(item for item in inventory.review_candidates

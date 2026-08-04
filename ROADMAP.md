@@ -13,7 +13,7 @@ debugging, testing, implementation, and execution audit of the real CLI.
 - [x] Recommend only structurally known download caches; keep generic
   application caches in the judgment-required tier.
 - [x] Reject ambiguous slash commands such as `/clean code`.
-- [ ] Base reclaim estimates on allocated disk blocks, not apparent/sparse-file
+- [x] Base reclaim estimates on allocated disk blocks, not apparent/sparse-file
   size, and deduplicate hard-linked inodes.
 - [ ] Give every deep scan one shared time budget and report unreadable areas.
 

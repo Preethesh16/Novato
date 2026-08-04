@@ -14,7 +14,8 @@ import re
 import shlex
 import shutil
 import subprocess
-from dataclasses import dataclass, field
+import time
+from dataclasses import dataclass, field, replace
 from typing import Callable
 
 from . import sysinfo as _sysinfo
@@ -82,8 +83,8 @@ _PACKAGE_CACHES = {
 
 
 def directory_bytes(path: str, *, run: Runner = _run) -> int:
-    """Return a directory's apparent size, or zero when it cannot be read."""
-    out = run(f"du -sb -- {shlex.quote(path)}")
+    """Return allocated bytes, matching what deleting the directory can reclaim."""
+    out = run(f"du -s -B1 -- {shlex.quote(path)}")
     first = out.strip().split(None, 1)
     if not first:
         return 0
@@ -170,8 +171,6 @@ def deep_scan(
     available: Callable[[str], str | None] = shutil.which,
 ) -> StorageScan:
     """Inspect disk capacity, large home folders, caches, and safe cleanup work."""
-    usage = disk_usage(home)
-    filesystems = _filesystem_capacities(home, disk_usage=disk_usage)
     cache_path = os.path.join(home, ".cache")
     large_dirs = _sysinfo.largest_dirs(home, limit=16, depth=2, run=run)
     cache_dirs = _sysinfo.largest_dirs(cache_path, limit=8, depth=2, run=run)
@@ -179,20 +178,31 @@ def deep_scan(
     # keeps this system scan off /home and virtual/network mounts.
     system_dirs = _sysinfo.largest_dirs("/", limit=12, depth=2, run=run)
     intelligence_rows = list({row.path: row for row in [*large_dirs, *cache_dirs]}.values())
+    cleanup = cleanup_items(
+        package_manager, home, aur_helper=aur_helper,
+        run=run, available=available,
+    )
+    notes = _scan_notes(package_manager, run=run, available=available)
+    inventory = analyze_home(home, intelligence_rows)
+
+    # A deep scan can take long enough for a just-started cleanup (notably a
+    # Trash empty operation) to finish while the scan is running.  Capacity
+    # sampled before that work would make the verification result stale even
+    # though the findings below are current.  Take both capacity snapshots only
+    # after all potentially long-running analysis has completed.
+    usage = disk_usage(home)
+    filesystems = _filesystem_capacities(home, disk_usage=disk_usage)
     return StorageScan(
         total_bytes=usage.total,
         used_bytes=usage.used,
         free_bytes=usage.free,
         large_dirs=large_dirs,
         cache_dirs=cache_dirs,
-        cleanup=cleanup_items(
-            package_manager, home, aur_helper=aur_helper,
-            run=run, available=available,
-        ),
+        cleanup=cleanup,
         filesystems=filesystems,
-        notes=_scan_notes(package_manager, run=run, available=available),
+        notes=notes,
         system_dirs=system_dirs,
-        inventory=analyze_home(home, intelligence_rows),
+        inventory=inventory,
     )
 
 
@@ -207,6 +217,77 @@ def capacity_scan(
         free_bytes=usage.free,
         filesystems=_filesystem_capacities(path, disk_usage=disk_usage),
     )
+
+
+def settle_capacity(
+    scan: StorageScan,
+    path: str,
+    *,
+    disk_usage: Callable = shutil.disk_usage,
+    sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
+    trash_pending: Callable[[str], bool] | None = None,
+    interval: float = 0.25,
+    min_wait: float = 3.0,
+    stable_for: float = 1.0,
+    max_wait: float = 30.0,
+) -> StorageScan:
+    """Refresh capacity after asynchronous Trash deletion has had time to settle.
+
+    GVFS may return from ``gio trash --empty`` before its background worker has
+    released every block.  Sample for a short bounded grace period and keep the
+    newest values.  Findings remain those of the completed deep scan.
+    """
+    pending = trash_pending or _trash_has_payload
+    trash_path = os.path.join(path, ".local", "share", "Trash")
+    started = monotonic()
+    last_change = started
+    latest = capacity_scan(path, disk_usage=disk_usage)
+    signature = _capacity_signature(latest)
+    while True:
+        now = monotonic()
+        elapsed = now - started
+        if (
+            elapsed >= max(0.0, min_wait)
+            and now - last_change >= max(0.0, stable_for)
+            and not pending(trash_path)
+        ) or elapsed >= max(0.0, max_wait):
+            break
+        sleep(max(0.01, interval))
+        current = capacity_scan(path, disk_usage=disk_usage)
+        current_signature = _capacity_signature(current)
+        if current_signature != signature:
+            signature = current_signature
+            last_change = monotonic()
+        latest = current
+    return replace(
+        scan,
+        total_bytes=latest.total_bytes,
+        used_bytes=latest.used_bytes,
+        free_bytes=latest.free_bytes,
+        filesystems=latest.filesystems,
+    )
+
+
+def _capacity_signature(scan: StorageScan) -> tuple:
+    return (
+        scan.total_bytes, scan.used_bytes, scan.free_bytes,
+        tuple((item.device, item.used_bytes, item.free_bytes)
+              for item in scan.filesystems),
+    )
+
+
+def _trash_has_payload(trash_path: str) -> bool:
+    """Whether GVFS still has user data or expunged data waiting for deletion."""
+    for name in ("files", "expunged"):
+        path = os.path.join(trash_path, name)
+        try:
+            with os.scandir(path) as entries:
+                if next(entries, None) is not None:
+                    return True
+        except OSError:
+            continue
+    return False
 
 
 def _filesystem_capacities(

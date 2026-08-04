@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import os
+import shlex
+import shutil
+
 import pytest
+from rich.console import Console
 
 from novato import config as cfgmod
 from novato import executor as execmod
@@ -379,11 +384,11 @@ def test_disk_cleanup_confirms_command_and_rescans(
     app = _scripted_app(arch_system, ["y"], monkeypatch)
     assert app._cmd_disk() == 0
     assert called == ["sudo pacman -Sc"]
-    assert "Recovered 500 B" in capsys.readouterr().out
+    assert "Net free-space increase during cleanup: 500 B" in capsys.readouterr().out
 
 
 def test_disk_cleanup_dry_run_only_shows_commands(
-    arch_system, isolated_home, monkeypatch
+    arch_system, isolated_home, monkeypatch, capsys
 ):
     import novato.main as mainmod
     from novato.storage import CleanupItem, StorageScan
@@ -402,6 +407,8 @@ def test_disk_cleanup_dry_run_only_shows_commands(
 
     app = _scripted_app(arch_system, ["y"], monkeypatch, dry_run=True)
     assert app._cmd_disk() == 0
+    output = capsys.readouterr().out
+    assert output.count("sudo pacman -Sc") == 1
 
 
 def test_folder_review_requires_selection_and_confirmation(
@@ -411,9 +418,11 @@ def test_folder_review_requires_selection_and_confirmation(
     from novato.executor import ExecResult
     from novato.storage_analyzer import ReviewCandidate
 
-    command = "gio trash /home/u/project/.venv"
+    target = isolated_home / "project" / ".venv"
+    target.mkdir(parents=True)
+    command = f"gio trash {target}"
     candidate = ReviewCandidate(
-        "Python environment", "/home/u/project/.venv", 500_000_000,
+        "Python environment", str(target), 500_000_000,
         "rebuildable folder", "Generated dependencies.", command,
         "move to Trash", 180,
     )
@@ -431,22 +440,26 @@ def test_folder_review_requires_selection_and_confirmation(
     assert called == [command]
 
 
-def test_smart_cleanup_guides_recommended_caches_largest_first(
+def test_smart_cleanup_executes_approved_plan_without_per_item_prompts(
     arch_system, isolated_home, monkeypatch
 ):
     import novato.main as mainmod
     from novato.executor import ExecResult
     from novato.storage_analyzer import ReviewCandidate
 
+    npm = isolated_home / ".npm" / "_cacache"
+    yarn = isolated_home / ".yarn" / "berry" / "cache"
+    npm.mkdir(parents=True)
+    yarn.mkdir(parents=True)
     candidates = [
         ReviewCandidate(
-            "npm", "/home/u/.npm/_cacache", 800_000_000, "download cache",
-            "Regeneratable.", "gio trash /home/u/.npm/_cacache",
+            "npm", str(npm), 800_000_000, "download cache",
+            "Regeneratable.", f"gio trash {npm}",
             "move to Trash", recommended=True,
         ),
         ReviewCandidate(
-            "yarn", "/home/u/.yarn/berry/cache", 700_000_000, "download cache",
-            "Regeneratable.", "gio trash /home/u/.yarn/berry/cache",
+            "yarn", str(yarn), 700_000_000, "download cache",
+            "Regeneratable.", f"gio trash {yarn}",
             "move to Trash", recommended=True,
         ),
     ]
@@ -456,12 +469,81 @@ def test_smart_cleanup_guides_recommended_caches_largest_first(
         lambda command, **kwargs: called.append(command)
         or ExecResult(command, 0, executed=True),
     )
-    app = _scripted_app(arch_system, ["y", "n"], monkeypatch)
-    completed, moved, moved_bytes = app._offer_recommended_storage_candidates(
-        candidates
+    app = _scripted_app(arch_system, [], monkeypatch)
+    completed, moved, moved_bytes, failed_items, failed_candidates = (
+        app._execute_recommended_storage_plan([], candidates)
     )
-    assert (completed, moved, moved_bytes) == (1, True, 800_000_000)
-    assert called == ["gio trash /home/u/.npm/_cacache"]
+    assert (completed, moved, moved_bytes) == (2, True, 1_500_000_000)
+    assert failed_items == []
+    assert failed_candidates == []
+    assert called == [f"gio trash {npm}", f"gio trash {yarn}"]
+
+
+def test_manual_storage_review_executes_three_selected_rows_with_one_confirmation(
+    arch_system, isolated_home, monkeypatch
+):
+    import novato.main as mainmod
+    from novato.executor import ExecResult
+    from novato.storage_analyzer import ReviewCandidate
+
+    candidates = []
+    for number in range(1, 6):
+        target = isolated_home / f"cache-{number}"
+        target.mkdir()
+        command = f"gio trash {target}"
+        candidates.append(ReviewCandidate(
+            f"cache-{number}", str(target), number * 100,
+            "rebuildable folder", "Generated data.", command, "move to Trash",
+        ))
+    called = []
+    monkeypatch.setattr(mainmod._sysinfo, "largest_dirs", lambda *a, **k: [])
+    monkeypatch.setattr(
+        mainmod, "execute",
+        lambda command, **kwargs: called.append(command)
+        or ExecResult(command, 0, executed=True),
+    )
+
+    app = _scripted_app(arch_system, ["1 3 5", "y"], monkeypatch)
+    completed, moved, moved_bytes = app._review_storage_candidates(candidates)
+
+    assert completed == 3
+    assert moved is True
+    assert moved_bytes == 900
+    assert called == [candidates[index].command for index in (0, 2, 4)]
+
+
+def test_manual_storage_batch_skips_a_path_that_vanished(
+    arch_system, isolated_home, monkeypatch
+):
+    import novato.main as mainmod
+    from novato.executor import ExecResult
+    from novato.storage_analyzer import ReviewCandidate
+
+    existing = isolated_home / "existing"
+    existing.mkdir()
+    candidates = [
+        ReviewCandidate(
+            "gone", str(isolated_home / "gone"), 500, "rebuildable folder",
+            "Generated.", f"gio trash {isolated_home / 'gone'}", "move to Trash",
+        ),
+        ReviewCandidate(
+            "existing", str(existing), 300, "rebuildable folder", "Generated.",
+            f"gio trash {existing}", "move to Trash",
+        ),
+    ]
+    called = []
+    monkeypatch.setattr(mainmod._sysinfo, "largest_dirs", lambda *a, **k: [])
+    monkeypatch.setattr(
+        mainmod, "execute",
+        lambda command, **kwargs: called.append(command)
+        or ExecResult(command, 0, executed=True),
+    )
+    app = _scripted_app(arch_system, ["1 2", "y"], monkeypatch)
+
+    completed, moved, moved_bytes = app._review_storage_candidates(candidates)
+
+    assert (completed, moved, moved_bytes) == (1, True, 300)
+    assert called == [candidates[1].command]
 
 
 def test_disk_cleanup_accumulates_recommended_and_reviewed_trash(
@@ -472,15 +554,19 @@ def test_disk_cleanup_accumulates_recommended_and_reviewed_trash(
     from novato.storage import CleanupItem, StorageScan
     from novato.storage_analyzer import Inventory, ReviewCandidate
 
+    npm = isolated_home / ".npm" / "_cacache"
+    environment = isolated_home / "project" / ".venv"
+    npm.mkdir(parents=True)
+    environment.mkdir(parents=True)
     recommended = ReviewCandidate(
-        "npm", "/home/u/.npm/_cacache", 200, "download cache",
-        "Regeneratable.", "gio trash /home/u/.npm/_cacache",
+        "npm", str(npm), 200, "download cache",
+        "Regeneratable.", f"gio trash {npm}",
         "move to Trash", recommended=True,
     )
     reviewed = ReviewCandidate(
-        "Python environment", "/home/u/project/.venv", 300,
+        "Python environment", str(environment), 300,
         "rebuildable folder", "Generated dependencies.",
-        "gio trash /home/u/project/.venv", "move to Trash",
+        f"gio trash {environment}", "move to Trash",
     )
     before = StorageScan(
         10_000, 7_000, 3_000,
@@ -500,10 +586,11 @@ def test_disk_cleanup_accumulates_recommended_and_reviewed_trash(
         mainmod, "execute",
         lambda command, **kwargs: ExecResult(command, 0, executed=True),
     )
+    monkeypatch.setattr(mainmod._storage, "directory_bytes", lambda path: 600)
 
     app = _scripted_app(
         arch_system,
-        ["y", "y", "y", "1", "y", "n"],
+        ["y", "y", "1", "y", "n"],
         monkeypatch,
     )
     shown = []
@@ -516,15 +603,234 @@ def test_disk_cleanup_accumulates_recommended_and_reviewed_trash(
     assert trash.estimated_bytes == 600
 
 
+@pytest.mark.parametrize("iteration", range(5))
+def test_complete_storage_workflow_repeats_cleanly_five_times(
+    iteration, arch_system, isolated_home, monkeypatch, capsys
+):
+    """One approval runs recommendations, then one batch approval runs 3 rows."""
+    import novato.main as mainmod
+    from novato.executor import ExecResult
+    from novato.storage import CleanupItem, StorageScan
+    from novato.storage_analyzer import Inventory, ReviewCandidate
+
+    root = isolated_home / f"loop-{iteration}"
+    npm = root / ".npm" / "_cacache"
+    npm.mkdir(parents=True)
+    reviewed = []
+    for number in range(1, 4):
+        target = root / f"manual-{number}"
+        target.mkdir()
+        reviewed.append(ReviewCandidate(
+            f"manual-{number}", str(target), number * 100,
+            "rebuildable folder", "Generated data.", f"gio trash {target}",
+            "move to Trash",
+        ))
+    recommended = ReviewCandidate(
+        "npm", str(npm), 200, "download cache", "Downloaded cache.",
+        f"gio trash {npm}", "move to Trash", recommended=True,
+    )
+    package = CleanupItem(
+        "packages", "Package cache", "Downloaded installers.",
+        "sudo package-clean", 100,
+    )
+    trash = CleanupItem(
+        "trash", "Trash", "Existing Trash.", "gio trash --empty", 50,
+    )
+    before = StorageScan(
+        10_000, 9_000, 1_000, cleanup=[package, trash],
+        inventory=Inventory(review_candidates=[recommended, *reviewed]),
+    )
+    after = StorageScan(10_000, 7_000, 3_000, inventory=Inventory())
+    scans = iter([before, after])
+    monkeypatch.setattr(mainmod._storage, "deep_scan", lambda *a, **k: next(scans))
+    monkeypatch.setattr(mainmod._storage, "directory_bytes", lambda path: 800)
+    monkeypatch.setattr(mainmod._storage, "settle_capacity", lambda scan, path: scan)
+    monkeypatch.setattr(mainmod._sysinfo, "disk_mounts", lambda: [])
+    monkeypatch.setattr(mainmod._sysinfo, "has_ncdu", lambda: True)
+    monkeypatch.setattr(mainmod._sysinfo, "largest_dirs", lambda *a, **k: [])
+    called = []
+    monkeypatch.setattr(
+        mainmod, "execute",
+        lambda command, **kwargs: called.append(command)
+        or ExecResult(command, 0, executed=True),
+    )
+    answers = iter(["y", "y", "1 2 3", "y", "y"])
+    prompts = []
+
+    def answer(prompt):
+        prompts.append(prompt)
+        return next(answers)
+
+    app = App(
+        system=arch_system, config=cfgmod.Config(mode="basic"),
+        presenter=Presenter(console=Console(width=1000), input_fn=answer),
+        resolver=IntentResolver(),
+    )
+
+    assert app._cmd_disk() == 0
+    assert called == [
+        package.command, recommended.command,
+        *(candidate.command for candidate in reviewed), trash.command,
+    ]
+    assert sum("recommended cleanups" in prompt for prompt in prompts) == 1
+    assert sum("selected actions" in prompt for prompt in prompts) == 1
+    # The only per-command confirmation is the final irreversible Trash empty.
+    assert sum(prompt.startswith("Confirm?") for prompt in prompts) == 1
+    output = capsys.readouterr().out
+    assert output.index("Recommended cleanup plan") < output.index("Inspect deeper")
+    assert package.command in output
+    assert recommended.command in output
+
+
+def test_declining_recommended_plan_executes_nothing(
+    arch_system, isolated_home, monkeypatch
+):
+    import novato.main as mainmod
+    from novato.storage import StorageScan
+    from novato.storage_analyzer import Inventory, ReviewCandidate
+
+    cache = isolated_home / ".npm" / "_cacache"
+    cache.mkdir(parents=True)
+    candidate = ReviewCandidate(
+        "npm", str(cache), 200, "download cache", "Downloaded cache.",
+        f"gio trash {cache}", "move to Trash", recommended=True,
+    )
+    scan = StorageScan(
+        10_000, 9_000, 1_000,
+        inventory=Inventory(review_candidates=[candidate]),
+    )
+    monkeypatch.setattr(mainmod._storage, "deep_scan", lambda *a, **k: scan)
+    monkeypatch.setattr(mainmod._sysinfo, "disk_mounts", lambda: [])
+    monkeypatch.setattr(mainmod._sysinfo, "has_ncdu", lambda: True)
+    monkeypatch.setattr(
+        mainmod, "execute",
+        lambda *a, **k: pytest.fail("declined recommendation executed"),
+    )
+    app = _scripted_app(arch_system, ["n"], monkeypatch)
+
+    assert app._cmd_disk() == 0
+
+
+@pytest.mark.parametrize("iteration", range(5))
+def test_storage_workflow_physically_reclaims_temp_files_five_times(
+    iteration, arch_system, tmp_path, monkeypatch, capsys
+):
+    """Exercise real moves/deletion/capacity changes in an isolated fake Trash."""
+    import novato.main as mainmod
+    from novato.executor import ExecResult
+    from novato.storage import CleanupItem, DiskCapacity, StorageScan, format_bytes
+    from novato.storage_analyzer import Inventory, ReviewCandidate
+
+    home = tmp_path / f"physical-home-{iteration}"
+    trash_files = home / ".local" / "share" / "Trash" / "files"
+    trash_files.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+
+    def allocate(path, size=8 * 1024**2):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "wb") as handle:
+            if hasattr(os, "posix_fallocate"):
+                os.posix_fallocate(handle.fileno(), 0, size)
+            else:
+                handle.write(b"x" * size)
+
+    allocate(trash_files / "already-trashed.bin")
+    npm = home / ".npm" / "_cacache"
+    allocate(npm / "cache.bin")
+    reviewed = []
+    for number in range(1, 4):
+        target = home / f"manual-{number}"
+        allocate(target / "artifact.bin")
+        reviewed.append(ReviewCandidate(
+            f"manual-{number}", str(target), mainmod._storage.directory_bytes(str(target)),
+            "rebuildable folder", "Generated data.",
+            shlex.join(["gio", "trash", str(target)]), "move to Trash",
+        ))
+    recommended = ReviewCandidate(
+        "npm", str(npm), mainmod._storage.directory_bytes(str(npm)),
+        "download cache", "Downloaded cache.",
+        shlex.join(["gio", "trash", str(npm)]), "move to Trash",
+        recommended=True,
+    )
+    initial_trash = mainmod._storage.directory_bytes(str(trash_files.parent))
+    trash = CleanupItem(
+        "trash", "Trash", "Existing Trash.", "gio trash --empty", initial_trash,
+    )
+    scan_count = 0
+    capacities = []
+
+    def scan(*args, **kwargs):
+        nonlocal scan_count
+        usage = shutil.disk_usage(home)
+        capacities.append(usage)
+        filesystem = DiskCapacity(
+            str(home), usage.total, usage.used, usage.free,
+            str(os.stat(home).st_dev),
+        )
+        inventory = Inventory(
+            review_candidates=[recommended, *reviewed] if scan_count == 0 else []
+        )
+        result = StorageScan(
+            usage.total, usage.used, usage.free,
+            cleanup=[trash] if scan_count == 0 else [],
+            filesystems=[filesystem], inventory=inventory,
+        )
+        scan_count += 1
+        return result
+
+    executed = []
+
+    def physical_execute(command, **kwargs):
+        executed.append(command)
+        tokens = shlex.split(command)
+        if tokens == ["gio", "trash", "--empty"]:
+            for child in list(trash_files.iterdir()):
+                shutil.rmtree(child) if child.is_dir() else child.unlink()
+        elif tokens[:2] == ["gio", "trash"] and len(tokens) == 3:
+            source = tokens[2]
+            shutil.move(source, trash_files / os.path.basename(source))
+        else:
+            return ExecResult(command, 1, executed=True)
+        return ExecResult(command, 0, executed=True)
+
+    real_settle = mainmod._storage.settle_capacity
+    monkeypatch.setattr(mainmod._storage, "deep_scan", scan)
+    monkeypatch.setattr(
+        mainmod._storage, "settle_capacity",
+        lambda snapshot, path: real_settle(
+            snapshot, path, min_wait=0, stable_for=0, max_wait=0.1,
+            trash_pending=lambda trash_path: False,
+        ),
+    )
+    monkeypatch.setattr(mainmod._sysinfo, "disk_mounts", lambda: [])
+    monkeypatch.setattr(mainmod._sysinfo, "has_ncdu", lambda: True)
+    monkeypatch.setattr(mainmod._sysinfo, "largest_dirs", lambda *a, **k: [])
+    monkeypatch.setattr(mainmod, "execute", physical_execute)
+    app = _scripted_app(
+        arch_system, ["y", "y", "1 2 3", "y", "y"], monkeypatch,
+    )
+
+    assert app._cmd_disk() == 0
+    assert executed == [
+        recommended.command, *(item.command for item in reviewed), trash.command,
+    ]
+    assert scan_count == 2
+    assert not any(trash_files.iterdir())
+    assert all(not os.path.lexists(item.path) for item in [recommended, *reviewed])
+    assert capacities[-1].free - capacities[0].free >= 24 * 1024**2
+    final_free = shutil.disk_usage(home).free
+    assert format_bytes(final_free) in capsys.readouterr().out
+
+
 def test_reviewed_trash_estimate_includes_existing_trash():
     from novato import storage
 
     existing = storage.CleanupItem(
         "trash", "Trash", "Existing files", "gio trash --empty", 100,
     )
-    updated = App._include_reviewed_trash([existing], 250)
+    updated = App._include_reviewed_trash([existing], 250, measured_bytes=275)
     assert len(updated) == 1
-    assert updated[0].estimated_bytes == 350
+    assert updated[0].estimated_bytes == 275
     assert "reviewed choices" in updated[0].title
 
 

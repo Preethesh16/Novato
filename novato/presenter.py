@@ -15,6 +15,7 @@ Design choices:
 
 from __future__ import annotations
 
+import re
 from typing import Callable, Optional, Sequence
 
 from rich.console import Console
@@ -123,6 +124,82 @@ class Presenter:
                 if 1 <= n <= count:
                     return n - 1
             self.console.print("[yellow]Please enter a number in range, or 'q'.[/]")
+
+    def prompt_choices(self, count: int) -> Optional[list[int]]:
+        """Ask for one or more choices and return de-duplicated 0-based indices.
+
+        Entries may be separated by whitespace, commas, or both.  Ascending
+        inclusive ranges are accepted too, so ``"2, 4-6 8"`` selects choices
+        2, 4, 5, 6, and 8.  A blank line, ``q``, EOF, or Ctrl-C safely quits.
+
+        This deliberately lives alongside, rather than changing,
+        :meth:`prompt_choice`: menus that require exactly one answer keep their
+        existing input contract.
+        """
+        if count < 1:
+            return None
+
+        while True:
+            answer = self._ask(
+                f"Pick one or more [1-{count}] (spaces, commas, or ranges), "
+                "or 'q' to quit: "
+            )
+            if answer is None:
+                return None
+
+            raw = answer.strip().lower()
+            if raw in ("q", "quit", ""):
+                return None
+
+            choices = self._parse_choices(raw, count)
+            if choices is not None:
+                return choices
+
+            self.console.print(
+                "[yellow]Please enter numbers or ascending ranges in range, "
+                "or 'q'.[/]"
+            )
+
+    @staticmethod
+    def _parse_choices(raw: str, count: int) -> Optional[list[int]]:
+        """Parse batch menu input, returning ``None`` when the whole entry is invalid."""
+        # Splitting on commas and whitespace is intentionally permissive about
+        # combinations such as ``1, 2 3``.  Empty comma fields remain errors so
+        # a typo like ``1,,3`` is not silently interpreted as a valid choice.
+        if (
+            not raw
+            or raw.startswith(",")
+            or raw.endswith(",")
+            or re.search(r",\s*,", raw)
+        ):
+            return None
+
+        tokens = re.split(r"[,\s]+", raw)
+        selected: list[int] = []
+        seen: set[int] = set()
+
+        for token in tokens:
+            match = re.fullmatch(r"(\d+)(?:-(\d+))?", token)
+            if match is None:
+                return None
+
+            try:
+                start = int(match.group(1))
+                end = int(match.group(2)) if match.group(2) is not None else start
+            except ValueError:
+                # Python limits extremely long decimal conversions.  Treat
+                # those inputs like any other malformed/out-of-range entry.
+                return None
+
+            if start < 1 or end < start or end > count:
+                return None
+
+            for choice in range(start - 1, end):
+                if choice not in seen:
+                    seen.add(choice)
+                    selected.append(choice)
+
+        return selected
 
     # -- Command + confirmation --------------------------------------------
 
@@ -383,7 +460,9 @@ class Presenter:
         )
         self.console.print(f"  {item.description}")
 
-    def show_smart_cleanup_plan(self, candidates, planned_bytes: int) -> None:
+    def show_smart_cleanup_plan(
+        self, candidates, planned_bytes: int, *, cleanup_items=(),
+    ) -> None:
         """Summarize the high-confidence, high-return tier before prompting."""
         from .storage import format_bytes
 
@@ -396,10 +475,16 @@ class Presenter:
             "[dim]These are downloaded/regeneratable caches, ranked by space saved. "
             "Configuration, projects, SDKs, models, and personal files are excluded.[/]"
         )
+        for item in cleanup_items:
+            self.console.print(
+                f"  [bold]{format_bytes(item.estimated_bytes):>9}[/]  {item.title}"
+            )
+            self.console.print(f"             [dim]{item.command}[/]")
         for candidate in candidates:
             self.console.print(
                 f"  [bold]{format_bytes(candidate.size_bytes):>9}[/]  {candidate.path}"
             )
+            self.console.print(f"             [dim]{candidate.command}[/]")
 
     def show_review_candidates(self, candidates) -> None:
         """Show the interactive folder/file drill-down menu."""
@@ -461,7 +546,9 @@ class Presenter:
         )
         self.console.print()
         if recovered:
-            self.success(f"Recovered {format_bytes(recovered)}.")
+            self.success(
+                f"Net free-space increase during cleanup: {format_bytes(recovered)}."
+            )
         else:
             self.warn("The commands finished, but no measurable space was recovered.")
         if len(changes) > 1:

@@ -78,7 +78,7 @@ class Inventory:
 
 _BUILD_PARTS = frozenset({
     "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache",
-    ".ruff_cache", ".tox", ".gradle", "target", "build", "cmake-build-debug",
+    ".ruff_cache", ".tox", "target", "build", "cmake-build-debug",
     "cmake-build-release", ".parcel-cache", ".next", ".venv", "venv",
 })
 _PERSONAL_ROOTS = frozenset({
@@ -110,6 +110,10 @@ _ECOSYSTEM_CACHE_PATTERNS = (
     (".gradle", "native"),
     (".gradle", "wrapper", "dists"),
 )
+_SAFE_APP_CACHE_NAMES = frozenset({
+    "pip", "uv", "pnpm", "ms-playwright", "playwright", "thumbnails",
+    "vscode-cpptools", "mesa_shader_cache",
+})
 
 
 def classify_path(path: str, home: str, *, is_file: bool = False,
@@ -145,6 +149,12 @@ def classify_path(path: str, home: str, *, is_file: bool = False,
             "Generated dependency/build output; source files should remain, but "
             "rebuilding may take time or require downloads.",
             0.88,
+        )
+    if ".gradle" in part_set and parts and parts[0] != ".gradle":
+        return (
+            REBUILDABLE,
+            "Project-local Gradle output; it can be regenerated from the project.",
+            0.9,
         )
     if name in ("dist", "out") and not is_file:
         return REBUILDABLE, "Likely generated build output; review before removal.", 0.72
@@ -201,10 +211,15 @@ def analyze_home(
         return inventory
 
     started = time.monotonic()
+    trash_root = os.path.realpath(os.path.join(home, ".local", "share", "Trash"))
     largest: list[tuple[int, str, float]] = []
     duplicate_candidates: dict[int, list[tuple[str, tuple[int, int]]]] = {}
-    generated_stats: dict[str, tuple[int, float]] = {}
-    sdk_stats: dict[tuple[str, str, str], tuple[int, float]] = {}
+    generated_links: dict[
+        str, dict[tuple[int, int], tuple[int, int, int, float]]
+    ] = {}
+    sdk_links: dict[
+        tuple[str, str, str], dict[tuple[int, int], tuple[int, int, int, float]]
+    ] = {}
     stop = False
 
     for root, dirs, files in os.walk(home, topdown=True, followlinks=False):
@@ -212,6 +227,9 @@ def analyze_home(
         kept_dirs = []
         for dirname in dirs:
             full = os.path.join(root, dirname)
+            real_full = os.path.realpath(full)
+            if real_full == trash_root or real_full.startswith(trash_root + os.sep):
+                continue
             try:
                 info = os.stat(full, follow_symlinks=False)
             except OSError:
@@ -240,15 +258,23 @@ def analyze_home(
                     group.append((path, (info.st_dev, info.st_ino)))
             generated = _generated_root(path, home)
             if generated:
-                old_size, old_time = generated_stats.get(generated, (0, 0.0))
-                generated_stats[generated] = (
-                    old_size + info.st_size, max(old_time, info.st_mtime),
+                inode = (info.st_dev, info.st_ino)
+                links = generated_links.setdefault(generated, {})
+                count, blocks, link_count, modified = links.get(
+                    inode, (0, info.st_blocks * 512, info.st_nlink, 0.0),
+                )
+                links[inode] = (
+                    count + 1, blocks, link_count, max(modified, info.st_mtime),
                 )
             sdk_component = _sdk_component(path, home)
             if sdk_component:
-                old_size, old_time = sdk_stats.get(sdk_component, (0, 0.0))
-                sdk_stats[sdk_component] = (
-                    old_size + info.st_size, max(old_time, info.st_mtime),
+                inode = (info.st_dev, info.st_ino)
+                links = sdk_links.setdefault(sdk_component, {})
+                count, blocks, link_count, modified = links.get(
+                    inode, (0, info.st_blocks * 512, info.st_nlink, 0.0),
+                )
+                links[inode] = (
+                    count + 1, blocks, link_count, max(modified, info.st_mtime),
                 )
 
             if inventory.files_scanned >= max_files or (
@@ -275,15 +301,16 @@ def analyze_home(
         ))
 
     inventory.duplicates = _verified_duplicates(duplicate_candidates)
+    generated_stats = _reclaimable_link_stats(generated_links)
+    sdk_stats = _reclaimable_link_stats(sdk_links)
     existing = {finding.path: finding for finding in inventory.findings}
+    for path in list(existing):
+        if _actionable_generated(path, home) and path not in generated_stats:
+            existing.pop(path)
     for path, (size, modified) in generated_stats.items():
-        if size < 25 * 1024**2:
-            continue
         kind, reason, confidence = classify_path(path, home)
-        current = existing.get(path)
         age_days = max(0, int((now - modified) / 86400)) if modified else None
-        finding = Finding(path, max(size, current.size_bytes if current else 0),
-                          kind, reason, confidence, age_days)
+        finding = Finding(path, size, kind, reason, confidence, age_days)
         existing[path] = finding
     inventory.findings = list(existing.values())
     inventory.findings.sort(key=lambda finding: finding.size_bytes, reverse=True)
@@ -291,6 +318,24 @@ def analyze_home(
         inventory, home, sdk_stats=sdk_stats, now=now,
     )
     return inventory
+
+
+def _reclaimable_link_stats(roots):
+    """Count an inode only when removing this one root releases its blocks.
+
+    If a hard link exists outside the candidate root (including another cache
+    or protected data), deleting this root cannot reclaim that inode's blocks.
+    """
+    result = {}
+    for root, inodes in roots.items():
+        size = 0
+        modified = 0.0
+        for count, blocks, link_count, newest in inodes.values():
+            modified = max(modified, newest)
+            if count >= link_count:
+                size += blocks
+        result[root] = (size, modified)
+    return result
 
 
 def _generated_root(path: str, home: str) -> str:
@@ -324,7 +369,10 @@ def _generated_root(path: str, home: str) -> str:
         return ""
     indexes = [index for index, part in enumerate(lowered) if part in _BUILD_PARTS]
     if indexes:
-        index = indexes[-1]
+        # Use the outermost generated tree. Offering both a parent node_modules
+        # and nested build/node_modules paths creates overlapping actions; once
+        # the parent moves, every child command becomes stale.
+        index = indexes[0]
         return os.path.join(home, *parts[:index + 1])
     return ""
 
@@ -391,7 +439,11 @@ def _build_review_candidates(
     gio = shutil.which("gio")
 
     for finding in inventory.findings:
-        if finding.kind != REBUILDABLE or not _actionable_generated(finding.path, home):
+        if (
+            finding.kind != REBUILDABLE
+            or finding.size_bytes < 25 * 1024**2
+            or not _actionable_generated(finding.path, home)
+        ):
             continue
         command = shlex.join([gio, "trash", finding.path]) if gio else ""
         download_cache = _is_download_cache_root(finding.path, home)
@@ -467,7 +519,36 @@ def _build_review_candidates(
     unique: dict[str, ReviewCandidate] = {}
     for candidate in candidates:
         unique.setdefault(os.path.realpath(candidate.path), candidate)
-    return sorted(unique.values(), key=_candidate_priority, reverse=True)[:40]
+    candidates = _remove_overlapping_candidates(list(unique.values()))
+    return sorted(candidates, key=_candidate_priority, reverse=True)[:40]
+
+
+def _remove_overlapping_candidates(
+    candidates: list[ReviewCandidate],
+) -> list[ReviewCandidate]:
+    """Remove child actions already covered by an actionable parent folder."""
+    by_depth = sorted(
+        candidates,
+        key=lambda item: (len(Path(item.path).parts), -item.size_bytes),
+    )
+    selected: list[ReviewCandidate] = []
+    for candidate in by_depth:
+        real_path = os.path.realpath(candidate.path)
+        covered = False
+        if candidate.action.startswith("move"):
+            for parent in selected:
+                if not parent.command or not parent.action.startswith("move"):
+                    continue
+                real_parent = os.path.realpath(parent.path)
+                try:
+                    covered = os.path.commonpath([real_parent, real_path]) == real_parent
+                except ValueError:
+                    covered = False
+                if covered and real_path != real_parent:
+                    break
+        if not covered:
+            selected.append(candidate)
+    return selected
 
 
 def _candidate_priority(item: ReviewCandidate) -> tuple[int, int, int]:
@@ -491,7 +572,13 @@ def _is_download_cache_root(path: str, home: str) -> bool:
     except ValueError:
         return False
     lowered = [part.lower() for part in relative.parts]
-    return _matching_cache_root(lowered) == len(lowered)
+    if _matching_cache_root(lowered) == len(lowered):
+        return True
+    return (
+        len(lowered) == 2
+        and lowered[0] == ".cache"
+        and lowered[1] in _SAFE_APP_CACHE_NAMES
+    )
 
 
 def _actionable_generated(path: str, home: str) -> bool:
@@ -510,6 +597,8 @@ def _actionable_generated(path: str, home: str) -> bool:
     if len(lowered) == 2 and lowered[0] == ".cache":
         return lowered[1] != "yay"  # yay has a safer native cleanup flow.
     if basename in _BUILD_PARTS or basename in {"dist", "out"}:
+        return True
+    if basename == ".gradle" and lowered[0] != ".gradle":
         return True
     if ".gradle" in lowered and basename in {"caches", "daemon", "native", "dists"}:
         return True

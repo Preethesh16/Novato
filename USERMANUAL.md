@@ -439,12 +439,22 @@ folders even deep inside projects and never follows symlinks or crosses onto a
 different mounted filesystem. Important and uncertain data is reported but
 never automatically deleted, and no path or hash is sent to an online model.
 
-The scan then asks whether you want to inspect candidates one by one. Its menu
-includes old virtual environments, `node_modules`, build output, application
-caches, old archives, exact duplicate copies, Android SDK packages/system
-images, and AVD emulators. Selecting an entry shows one folder level deeper and
-asks before acting. Files/folders go to Trash first; Android items use their
-official manager command. Emptying Trash remains a separate irreversible prompt.
+The scan first shows a recommended plan of high-confidence package, log, and
+download-cache cleanups, including every exact command and the measured total.
+One `y` approves that complete plan; Enter or `n` skips all of it.
+
+Next, a separate judgment-required table includes old virtual environments,
+`node_modules`, build output, generic application caches, old archives, exact
+duplicate copies, Android SDK packages/system images, and AVD emulators. Select
+one row or several rows at once, for example `13 15 17`, `13,15,17`, or
+`13-17`. Novato previews the selected actions and asks once for that batch.
+Files/folders go to Trash first; Android items use their official manager
+command. Emptying Trash remains a separate irreversible prompt.
+
+Trash contents and overlapping parent/child paths are not offered again. After
+emptying Trash, Novato waits briefly for the background deletion to settle and
+then reads capacity again, so the displayed free space reflects the current
+filesystem rather than the start of the scan.
 
 `/process` lets you pick a program and stop it — always with a confirmation
 first, never automatically.

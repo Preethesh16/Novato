@@ -175,8 +175,12 @@ Ubuntu/Debian, or Fedora, then:
    and the biggest application-cache areas;
 2. identifies measurable cleanup such as downloaded package files, Trash, and
    oversized old system logs;
-3. explains and shows every cleanup command, asking `y/N` separately for each;
-4. scans again and reports the actual space recovered and space remaining.
+3. shows one ranked recommended plan with every exact command, then runs the
+   whole plan after one default-No confirmation;
+4. opens a second judgment-required table where you can select several rows at
+   once (`13 15 17`, `13,15,17`, or `13-17`) and approve that batch once;
+5. empties Trash only after a separate irreversible confirmation, waits for
+   asynchronous deletion to settle, and reports current free space again.
 
 The cleanup is ranked rather than dumped as a folder list: Novato first builds
 a high-confidence plan from structurally known developer download caches, then
@@ -202,12 +206,18 @@ content-hashes same-sized large files before reporting
 them as duplicates. It also inventories the root filesystem separately and
 protects system-managed areas. File paths and hashes never leave the machine.
 
-After the report, Novato offers an interactive drill-down menu. Pick any
-candidate to see its next folder level, measured size, newest-content age,
-classification evidence, and exact proposed action. Generated project folders
+After the recommended plan, Novato offers an interactive drill-down menu. Pick
+one or several candidates to see measured size, newest-content age,
+classification evidence, and exact proposed actions. Generated project folders
 and old files are moved to Trash first; Android platforms, build-tools, system
-images, and virtual devices are handled with `sdkmanager`/`avdmanager`. Nothing
-is selected automatically, and every action has its own default-No confirmation.
+images, and virtual devices are handled with `sdkmanager`/`avdmanager`. No batch
+runs until its default-No confirmation.
+
+Novato excludes Trash from the candidate inventory, removes overlapping
+parent/child actions, protects the `~/.gradle` configuration root while still
+offering its cache subtrees, and measures allocated blocks rather than sparse
+apparent file sizes. The final capacity sample is taken after analysis and a
+bounded Trash-settling period so it matches the filesystem's current state.
 
 Storage routing uses Novato's intent system rather than a substring shortcut.
 Online and Offline modes ask their language model to classify the user's goal;
