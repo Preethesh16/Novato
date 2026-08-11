@@ -50,6 +50,13 @@ _CHANGE_POLICIES: dict[str, tuple[str, ...]] = {
     "update-initramfs": ("-u",),
     "paccache": ("-r", "-rk1", "-ruk0"),
 }
+_PACKAGE_PROGRAMS = frozenset({"pacman", "yay", "paru", "apt", "apt-get", "dnf", "zypper"})
+_PACKAGE_ALIASES = {
+    "vscode": ("visual-studio-code-bin", "visual-studio-code", "code", "vscode"),
+    "visualstudiocode": ("visual-studio-code-bin", "visual-studio-code", "code", "vscode"),
+    "chrome": ("google-chrome", "google-chrome-beta", "chromium"),
+    "spotify": ("spotify", "spotify-launcher"),
+}
 
 
 def _now() -> str:
@@ -142,6 +149,13 @@ class ToolRegistry:
                     "package": {"type": "string"}, "pending": {"type": "boolean"},
                 }, "additionalProperties": False,
             }),
+            ToolSpec("propose_package_action", "Propose installing, updating, or removing one package. Novato derives the command from the detected distro and installed source; never supply a package-manager command yourself.", {
+                "type": "object", "properties": {
+                    "action": {"type": "string", "enum": ["install", "update", "remove"]},
+                    "package": {"type": "string", "maxLength": 150},
+                    "source": {"type": "string", "enum": ["official", "aur"]},
+                }, "required": ["action", "package"], "additionalProperties": False,
+            }, ToolRisk.CHANGE),
             ToolSpec("search_packages", "Search real configured repositories for software matching candidate names.", {
                 "type": "object", "properties": {
                     "candidates": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
@@ -196,6 +210,8 @@ class ToolRegistry:
             return ToolResult(name, False, timestamp=_now(), error="unknown tool")
         if name == "propose_action":
             return self._propose_action(arguments)
+        if name == "propose_package_action":
+            return self._propose_package_action(arguments)
         if name == "propose_config_edit":
             return self._propose_config_edit(arguments)
         handler = getattr(self, f"_{name}", None)
@@ -239,10 +255,14 @@ class ToolRegistry:
     def _inspect_packages(self, args: dict[str, Any]) -> ToolResult:
         package = str(args.get("package", "")).strip()
         if package:
-            info = installed.get_info(package, self.system.package_manager)
+            matches = self._installed_matches(package)
+            info = matches[0] if len(matches) == 1 else None
             return ToolResult("inspect_packages", True, {
-                "package": package, "installed": info is not None,
+                "query": package, "distro": self.system.distro_name,
+                "package_manager": self.system.package_manager,
+                "installed": bool(matches), "ambiguous": len(matches) > 1,
                 "version": info.version if info else "", "origin": info.origin if info else "",
+                "matches": [vars(item) for item in matches],
             }, timestamp=_now())
         if not args.get("pending", False):
             versions = installed.installed_versions(self.system.package_manager)
@@ -261,6 +281,33 @@ class ToolRegistry:
         ok = rc in (0, 100)
         return ToolResult("inspect_packages", ok, {"pending_updates": output},
                           exit_status=rc, timestamp=_now(), truncated=truncated)
+
+    def _installed_matches(self, query: str) -> list[installed.InstalledInfo]:
+        """Resolve a familiar application name to real installed package names."""
+        versions = installed.installed_versions(self.system.package_manager)
+        foreign = installed.foreign_packages() if self.system.package_manager == "pacman" else set()
+        compact = re.sub(r"[^a-z0-9]", "", query.lower())
+        aliases = _PACKAGE_ALIASES.get(compact, ())
+        scored = []
+        for name, version in versions.items():
+            normalized = name.lower()
+            name_compact = re.sub(r"[^a-z0-9]", "", normalized)
+            score = 0.0
+            if normalized == query.lower() or name_compact == compact:
+                score = 1.0
+            elif normalized in aliases:
+                score = 0.99 - aliases.index(normalized) * 0.01
+            elif aliases:
+                score = 0.0
+            elif compact and compact in name_compact:
+                score = 0.88
+            elif len(compact) >= 4:
+                score = difflib.SequenceMatcher(None, compact, name_compact).ratio()
+            if score >= 0.72:
+                origin = installed.ORIGIN_AUR if name in foreign else installed.ORIGIN_OFFICIAL
+                scored.append((score, installed.InstalledInfo(name, version, origin)))
+        scored.sort(key=lambda item: (-item[0], item[1].name))
+        return [item for _score, item in scored[:8]]
 
     def _search_packages(self, args: dict[str, Any]) -> ToolResult:
         candidates = [str(item)[:80] for item in args.get("candidates", [])[:6]]
@@ -350,6 +397,12 @@ class ToolRegistry:
         allowed, reason = validate_action_argv(argv)
         if not allowed:
             return ToolResult("propose_action", False, timestamp=_now(), error=reason)
+        index = 1 if argv and argv[0] in ("sudo", "doas") else 0
+        if index < len(argv) and argv[index] in _PACKAGE_PROGRAMS:
+            return ToolResult(
+                "propose_action", False, timestamp=_now(),
+                error="package commands must use propose_package_action so Novato selects the distro and installed source",
+            )
         verify = str(args.get("verification_tool", ""))
         if self.risk_for(verify) is not ToolRisk.READ_ONLY:
             return ToolResult("propose_action", False, timestamp=_now(), error="verification must use a registered read-only tool")
@@ -357,6 +410,78 @@ class ToolRegistry:
             id=uuid.uuid4().hex[:12], purpose=str(args.get("purpose", ""))[:300],
             argv=argv, preview=shlex.join(argv), expected_result=str(args.get("expected_result", ""))[:300],
             verification_tool=verify, verification_args=dict(args.get("verification_args") or {}),
+        )
+
+    def _propose_package_action(self, args: dict[str, Any]) -> ActionProposal | ToolResult:
+        action = str(args.get("action", "")).lower()
+        query = str(args.get("package", "")).strip()
+        source = str(args.get("source", "official")).lower()
+        if action not in ("install", "update", "remove") or not query:
+            return ToolResult("propose_package_action", False, timestamp=_now(), error="invalid package action")
+        matches = self._installed_matches(query)
+        if action in ("update", "remove"):
+            if not matches:
+                return ToolResult(
+                    "propose_package_action", False, timestamp=_now(),
+                    facts={"query": query, "distro": self.system.distro_name,
+                           "package_manager": self.system.package_manager},
+                    error="no installed package matches that name; inspect packages before retrying",
+                )
+            if len(matches) > 1:
+                return ToolResult(
+                    "propose_package_action", False, timestamp=_now(),
+                    facts={"distro": self.system.distro_name,
+                           "package_manager": self.system.package_manager,
+                           "matches": [vars(item) for item in matches]},
+                    error="multiple installed packages match; ask the user which one",
+                )
+            target = matches[0]
+        else:
+            if matches:
+                return ToolResult(
+                    "propose_package_action", False, timestamp=_now(),
+                    facts={"matches": [vars(item) for item in matches]},
+                    error="the package is already installed; use update instead",
+                )
+            target = installed.InstalledInfo(query, "", source)
+
+        pm = self.system.package_manager
+        if pm == "pacman":
+            if action == "remove":
+                argv = ("sudo", "pacman", "-Rns", target.name)
+            elif target.origin == installed.ORIGIN_AUR or source == "aur":
+                if not self.system.aur_helper:
+                    return ToolResult("propose_package_action", False, timestamp=_now(),
+                                      error="this AUR package needs yay or paru, but no helper was detected")
+                argv = (self.system.aur_helper, "-S", target.name)
+            elif action == "update":
+                argv = ("sudo", "pacman", "-Syu", target.name)
+            else:
+                argv = ("sudo", "pacman", "-S", target.name)
+        elif pm == "apt":
+            verb = "remove" if action == "remove" else "install"
+            argv = ("sudo", "apt", verb, target.name)
+        elif pm == "dnf":
+            verb = "remove" if action == "remove" else ("upgrade" if action == "update" else "install")
+            argv = ("sudo", "dnf", verb, target.name)
+        elif pm == "zypper":
+            verb = "remove" if action == "remove" else ("update" if action == "update" else "install")
+            argv = ("sudo", "zypper", verb, target.name)
+        else:
+            return ToolResult("propose_package_action", False, timestamp=_now(),
+                              error="unsupported package manager")
+        allowed, reason = validate_action_argv(argv)
+        if not allowed:
+            return ToolResult("propose_package_action", False, timestamp=_now(), error=reason)
+        executor = argv[0]
+        origin = "AUR" if target.origin == installed.ORIGIN_AUR else "official repositories"
+        return ActionProposal(
+            id=uuid.uuid4().hex[:12],
+            purpose=(f"{action.capitalize()} {target.name} from {origin} on "
+                     f"{self.system.distro_name} using {executor}"),
+            operation="package_action", argv=argv, preview=shlex.join(argv),
+            expected_result=f"Recheck the installed version and source of {target.name}",
+            verification_tool="inspect_packages", verification_args={"package": target.name},
         )
 
     def _propose_config_edit(self, args: dict[str, Any]) -> ActionProposal | ToolResult:

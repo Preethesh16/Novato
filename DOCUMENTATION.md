@@ -88,6 +88,12 @@ responsibility and is independently testable.
 | `sysinfo.py` | Disk + process inspection helpers (`/disk`, `/process`). |
 | `learner.py` | Interactive, distro-aware tutorial engine (`/learn`). |
 
+Package mutations are a typed special case: Groq supplies only the requested
+operation and familiar application name. Novato resolves the real installed
+package, origin (official repository or AUR), distro package manager, and exact
+command locally. Generic model-generated `apt`/`pacman`/`yay` commands are not
+accepted by the agent executor.
+
 ---
 
 ## The three features

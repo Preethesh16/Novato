@@ -21,8 +21,10 @@ from .privacy import redact, redact_text
 _MAX_ROUNDS = 8
 _SYSTEM_PROMPT = """You are Novato, a careful Linux mentor and maintenance agent.
 Lead with the outcome. Never assume system state: use the registered read-only tools.
-Inspect before proposing a change and do not repeat a completed action. To change the
-system, call propose_action or propose_config_edit with exactly one change and a
+Inspect before proposing a change and do not repeat a completed action. For package
+requests, inspect the named package, preserve install/update/remove semantics, and use
+propose_package_action so Novato—not you—selects the distro package manager and source.
+For other changes, call propose_action or propose_config_edit with exactly one change and a
 registered read-only verification tool. The application, not you, decides whether it
 is safe and asks the user. Never claim success until the returned verification passes.
 Explain what changed, why it matters, material tradeoffs, and the next action in plain
@@ -53,6 +55,7 @@ class AgentSession:
         self.ledger: dict[str, TaskRecord] = {}
         self._tool_call_ids: set[str] = set()
         self._completed_actions: set[str] = set()
+        self._attempted_actions: set[str] = set()
         self._context_consent: Optional[bool] = None
 
     def reset(self) -> None:
@@ -60,6 +63,7 @@ class AgentSession:
         self.ledger.clear()
         self._tool_call_ids.clear()
         self._completed_actions.clear()
+        self._attempted_actions.clear()
         # Consent is once per session and intentionally survives /new.
 
     def ask(self, query: str) -> AgentOutcome:
@@ -71,10 +75,13 @@ class AgentSession:
         self.messages.append({"role": "user", "content": redact_text(query)})
         malformed = 0
         tool_steps = 0
-        inspected_this_turn = False
+        inspections_this_turn: set[str] = set()
         for _round in range(_MAX_ROUNDS):
             reply = self.backend.agent_completion(self.messages, self.registry.groq_tools())
             if reply is None:
+                if tool_steps:
+                    self.ui.warn("Groq could not finish the explanation; no additional action was taken.")
+                    return AgentOutcome(True, 0, "Groq stopped after local tool use")
                 return AgentOutcome(False, 1, "Groq was unavailable or rejected tool use")
             self.messages.append(reply.as_api_dict())
             if not reply.tool_calls:
@@ -108,15 +115,25 @@ class AgentSession:
                     else:
                         result = self.registry.execute(name, arguments)
                         if isinstance(result, ActionProposal):
-                            if not inspected_this_turn:
+                            required = (
+                                "inspect_packages" if result.operation == "package_action"
+                                else None
+                            )
+                            if not inspections_this_turn or (
+                                required is not None and required not in inspections_this_turn
+                            ):
                                 result = ToolResult(
                                     name, False,
-                                    error="inspect current state with a read-only tool before proposing a change",
+                                    error=(
+                                        f"run {required} for the named package before proposing this change"
+                                        if required else
+                                        "inspect current state with a read-only tool before proposing a change"
+                                    ),
                                 )
                             else:
                                 result = self._handle_action(result)
                         elif result.ok and name not in ("propose_action", "propose_config_edit"):
-                            inspected_this_turn = True
+                            inspections_this_turn.add(name)
                 outbound = result.as_dict()
                 if not self._allow_context(outbound):
                     # Keep the API message sequence valid without disclosing the
@@ -131,12 +148,20 @@ class AgentSession:
                     "role": "tool", "tool_call_id": call_id, "name": name,
                     "content": json.dumps(redact(outbound), ensure_ascii=False),
                 })
+                if result.facts.get("declined"):
+                    self.ui.info("Okay — nothing was changed.")
+                    return AgentOutcome(True)
         self.ui.warn("I reached the reasoning limit without a reliable final answer.")
         return AgentOutcome(True, 1, "reasoning limit reached")
 
     def _allow_context(self, current: dict[str, Any]) -> bool:
         if self._context_consent is not None:
             return self._context_consent
+        # Protocol/policy errors contain no local evidence. They can be sent
+        # back so the model corrects its tool call without consuming the user's
+        # one consent decision on an empty preview.
+        if not current.get("facts"):
+            return True
         preview = {
             "current_tool_result": redact(current),
             "remembered_verified_facts": [
@@ -171,8 +196,12 @@ class AgentSession:
             "operation": proposal.operation, "argv": proposal.argv,
             "path": proposal.path, "key": proposal.key, "value": proposal.value,
         }, sort_keys=True)
-        if fingerprint in self._completed_actions:
-            return ToolResult("action", False, error="identical action already completed in this session")
+        if fingerprint in self._attempted_actions:
+            return ToolResult(
+                "action", False,
+                error="identical action was already proposed in this session; do not repeat it",
+            )
+        self._attempted_actions.add(fingerprint)
         record = TaskRecord(proposal.id, proposal.purpose)
         self.ledger[proposal.id] = record
         self.ui.blank()

@@ -197,8 +197,9 @@ def test_mutation_requires_confirmation_and_decline_executes_nothing(
     executed = []
     monkeypatch.setattr("novato.agent.execute_argv", lambda *a, **k: executed.append(a))
     ui, _ = _ui(["y", "n"])  # consent to evidence, then decline the action
-    AgentSession(backend=backend, system=_system(), presenter=ui,
-                 registry=registry).ask("update")
+    outcome = AgentSession(backend=backend, system=_system(), presenter=ui,
+                           registry=registry).ask("update")
+    assert outcome.handled
     assert executed == []
 
 
@@ -311,6 +312,73 @@ def test_agent_action_policy_blocks_shell_and_arbitrary_programs():
     assert not validate_action_argv(["sudo", "apt", "install", "./untrusted.deb"])[0]
     assert not validate_action_argv(["sudo", "grub-mkconfig", "-o", "/tmp/grub.cfg"])[0]
     assert execute_argv(["echo", "should-not-run"], dry_run=True).blocked
+
+
+def test_arch_vscode_update_resolves_real_aur_package(monkeypatch):
+    monkeypatch.setattr(
+        "novato.agent_tools.installed.installed_versions",
+        lambda _pm: {"visual-studio-code-bin": "1.131.0-1", "firefox": "140.0-1"},
+    )
+    monkeypatch.setattr(
+        "novato.agent_tools.installed.foreign_packages",
+        lambda: {"visual-studio-code-bin"},
+    )
+    registry = ToolRegistry(_system())
+
+    inspection = registry.execute("inspect_packages", {"package": "vscode"})
+    assert inspection.ok
+    assert inspection.facts["package_manager"] == "pacman"
+    assert inspection.facts["matches"] == [{
+        "name": "visual-studio-code-bin", "version": "1.131.0-1", "origin": "aur",
+    }]
+
+    proposal = registry.execute(
+        "propose_package_action", {"action": "update", "package": "vscode"},
+    )
+    assert isinstance(proposal, ActionProposal)
+    assert proposal.operation == "package_action"
+    assert proposal.argv == ("yay", "-S", "visual-studio-code-bin")
+    assert proposal.verification_args == {"package": "visual-studio-code-bin"}
+
+
+def test_generic_model_package_command_is_rejected(monkeypatch):
+    monkeypatch.setattr(
+        "novato.agent_tools.installed.installed_versions", lambda _pm: {},
+    )
+    monkeypatch.setattr(
+        "novato.agent_tools.installed.foreign_packages", lambda: set(),
+    )
+    result = ToolRegistry(_system()).execute("propose_action", {
+        "purpose": "Install VSCode", "argv": ["sudo", "apt", "install", "code"],
+        "expected_result": "installed", "verification_tool": "inspect_packages",
+        "verification_args": {"package": "code"},
+    })
+    assert isinstance(result, ToolResult)
+    assert not result.ok
+    assert "propose_package_action" in result.error
+
+
+def test_package_action_requires_package_inspection(isolated_home, monkeypatch):
+    proposal = ActionProposal(
+        "pkg1", "Update visual-studio-code-bin using pacman",
+        operation="package_action", argv=("yay", "-S", "visual-studio-code-bin"),
+        expected_result="version rechecked", verification_tool="inspect_packages",
+        verification_args={"package": "visual-studio-code-bin"},
+    )
+    backend = _Backend([
+        _call("system", "get_system_summary"),
+        _call("proposal", "propose_package_action"),
+        AgentMessage("assistant", "I need package evidence first."),
+    ])
+    registry = _Registry([
+        ToolResult("get_system_summary", True, {"package_manager": "pacman"}), proposal,
+    ])
+    executed = []
+    monkeypatch.setattr("novato.agent.execute_argv", lambda *a, **k: executed.append(a))
+    ui, _ = _ui(["y"])
+    assert AgentSession(backend=backend, system=_system(), presenter=ui,
+                        registry=registry).ask("update vscode").handled
+    assert executed == []
 
 
 def test_read_file_tool_blocks_secrets_and_outside_paths(tmp_path):

@@ -31,6 +31,11 @@ and the project aims to follow [Semantic Versioning](https://semver.org/).
 - Changes the new-install Groq default to the tool-capable
   `openai/gpt-oss-120b`; existing model selections remain untouched and setup
   now verifies required local-tool support.
+- Grounds package actions in local evidence: familiar names such as `vscode`
+  resolve to the real installed package and source, and Novato derives the
+  correct distro command itself. Raw model-generated package-manager commands,
+  wrong-distro tools such as `apt` on Arch, and repeated declined proposals are
+  rejected.
 
 ### Smart storage workflow
 
