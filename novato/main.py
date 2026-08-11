@@ -104,6 +104,83 @@ class App:
             self.resolver = IntentResolver(build_router(self.config))
         self.teacher = Teacher()
         self.dry_run = dry_run
+        self._agent = None
+
+    def _online_backend(self):
+        router = getattr(self.resolver, "_backend", None)
+        return getattr(router, "online_backend", None)
+
+    def run_agent_query(self, query: str):
+        """Try the Groq agent; return its outcome or a fallback outcome."""
+        from .agent import AgentOutcome, AgentSession
+
+        backend = self._online_backend()
+        if backend is None:
+            return AgentOutcome(False, reason="no active Groq agent backend")
+        if self._agent is None:
+            self._agent = AgentSession(
+                backend=backend, system=self.system, presenter=self.ui,
+                dry_run=self.dry_run,
+            )
+        return self._agent.ask(query)
+
+    def chat(self) -> int:
+        """Run an interactive session while preserving context and task state."""
+        from .agent import AgentSession
+
+        backend = self._online_backend()
+        session = None
+        if backend is not None:
+            session = AgentSession(
+                backend=backend, system=self.system, presenter=self.ui,
+                dry_run=self.dry_run,
+            )
+            self._agent = session
+        else:
+            self.ui.warn(
+                "The Groq agent is not available. This chat will use Novato's "
+                "local deterministic fallback. Run /setup to configure online mode."
+            )
+        self.ui.blank()
+        self.ui.info("Novato chat — ask about this Linux system. Use /help or /exit.")
+        while True:
+            raw = self.ui.prompt_text("novato> ")
+            if raw is None:
+                self.ui.info("Chat ended.")
+                return 0
+            query = raw.strip()
+            if not query:
+                continue
+            if query in ("/exit", "/quit"):
+                self.ui.info("Chat ended.")
+                return 0
+            if query == "/new":
+                if session is not None:
+                    session.reset()
+                self.ui.success("Started a new conversation. Session privacy consent is unchanged.")
+                continue
+            if query == "/memory":
+                self._cmd_memory()
+                continue
+            if query.startswith("/forget"):
+                self._cmd_forget(query.split()[1:])
+                continue
+            if query == "/status" and session is not None:
+                self._cmd_status()
+                lines = session.status_lines()
+                if lines:
+                    self.ui.info("  Session tasks:")
+                    for line in lines:
+                        self.ui.info("    " + line)
+                continue
+            if query.startswith("/"):
+                self.slash(query.split())
+                continue
+            if session is not None:
+                outcome = session.ask(query)
+                if outcome.handled:
+                    continue
+            self.run_query(query)
 
     # -- NLPM: natural-language install flow --------------------------------
 
@@ -1118,11 +1195,47 @@ class App:
             "clean": self._cmd_disk,
             "process": lambda: self._cmd_process(joined),
             "learn": self._cmd_learn,
+            "memory": self._cmd_memory,
+            "forget": lambda: self._cmd_forget(rest),
         }.get(name)
         if handler is None:
             self.ui.warn(f"Unknown command '/{name}'. Try /help.")
             return 1
         return handler() or 0
+
+    def _cmd_memory(self) -> int:
+        from .agent_memory import MemoryStore
+
+        facts = MemoryStore().load()
+        self.ui.blank()
+        if not facts:
+            self.ui.info("Novato has no saved verified facts yet.")
+            return 0
+        self.ui.info("Verified local memory:")
+        for fact in facts:
+            self.ui.console.print(
+                f"  {fact.id}  {fact.timestamp}  {fact.subject}: {fact.summary}",
+                markup=False,
+            )
+        return 0
+
+    def _cmd_forget(self, rest: list[str]) -> int:
+        from .agent_memory import MemoryStore
+
+        if len(rest) != 1:
+            self.ui.warn("Use /forget <memory-id|all>.")
+            return 1
+        target = rest[0]
+        if not self.ui.ask_yes_no(f"Forget '{target}' from Novato's local memory?",
+                                  default_no=True):
+            self.ui.info("Okay — memory was left unchanged.")
+            return 0
+        removed = MemoryStore().forget(target)
+        if not removed:
+            self.ui.warn("No matching memory fact was found.")
+            return 1
+        self.ui.success(f"Forgot {removed} verified memory fact(s).")
+        return 0
 
     def _cmd_status(self) -> int:
         s, c = self.system, self.config
@@ -1166,6 +1279,8 @@ class App:
             "  /switch [online|offline|both|basic]   change AI mode",
             "  /mistake [on|off]                     toggle the silent error watcher",
             "  /status                               show current settings",
+            "  /memory                               show locally saved verified facts",
+            "  /forget <id|all>                      remove saved agent memory",
             "  /setup                                re-run the first-time setup wizard",
             "  /help                                 show this help",
         ]
@@ -1399,6 +1514,11 @@ def _dispatch(args: argparse.Namespace) -> int:
         return app.slash(args.words)
 
     query = " ".join(args.words)
+    if query.strip().lower() == "chat":
+        return app.chat()
+    outcome = app.run_agent_query(query)
+    if outcome.handled:
+        return outcome.exit_code
     return app.run_query(query)
 
 

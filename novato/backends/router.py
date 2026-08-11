@@ -66,6 +66,12 @@ class Router:
     def chain(self) -> list[str]:
         return [b.name for b in self._backends]
 
+    @property
+    def online_backend(self):
+        """Return the configured Groq tier, if it is active in this router."""
+        return next((backend for backend in self._backends
+                     if isinstance(backend, GroqBackend)), None)
+
     def resolve_intent(self, query: str) -> IntentResult:
         """Return the first backend's confident intent result, else Basic's."""
         last: Optional[IntentResult] = None

@@ -1,12 +1,19 @@
 # Novato Build Progress
 
 ## Status: CORE COMPLETE — DAILY-DRIVER WORK IN PROGRESS
-## Last Updated: 2026-07-27
-## Current focus: Trust, smart storage, diagnostics, and daily Linux workflows
+## Last Updated: 2026-08-11
+## Current focus: Smart agent reliability, diagnostics, and daily Linux workflows
 
 ---
 
 ## ✅ Completed
+
+- [x] Smart Groq agent — bounded local tool-calling loop, multi-turn
+      `novato chat`, one-shot routing, task ledger, and deterministic fallback
+- [x] Agent safety — typed read-only probes, allowlisted argv mutations,
+      default-No confirmation, elapsed-time status, and post-change verification
+- [x] Agent privacy and memory — redacted preview/consent, compact verified
+      `0600` memory, `/memory`, `/forget`, and no transcript persistence
 
 - [x] Project scaffolding (`pyproject.toml` with **uv** + hatchling, `.gitignore`, `LICENSE`)
 - [x] Package skeleton (`novato/`, `novato/backends/`, `tests/`)
@@ -113,9 +120,9 @@ the setup wizard onboards new users. All AI calls are dependency-injected so the
 suite runs fully offline.
 **Files created:** `novato/backends/{groq_backend,llamafile_backend,router}.py`,
 `novato/setup_wizard.py`, `tests/{test_router,test_setup}.py`.
-**Privacy:** Groq receives only the intent/error text the user typed — never
-commands, paths, usernames, or distro details; returned package names are
-validated against real local repos by the searcher.
+**Privacy:** Legacy classification sends only privacy-safe intent/error text.
+Agent evidence is redacted, previewed, and sent only after per-session consent;
+raw transcripts and unverified output are not persisted.
 **Tests passing:** 112/112. **Lint:** clean.
 
 ### Prompt 4 — 2026-06-10 — Phases 4 & 5: Slash Commands + Packaging (PROJECT COMPLETE)

@@ -110,6 +110,10 @@ class Presenter:
         except (EOFError, KeyboardInterrupt):
             return None
 
+    def prompt_text(self, prompt: str) -> Optional[str]:
+        """Public free-text prompt used by the interactive agent session."""
+        return self._ask(prompt)
+
     def prompt_choice(self, count: int) -> Optional[int]:
         """Ask the user to pick 1..count. Returns a 0-based index or None (quit)."""
         while True:

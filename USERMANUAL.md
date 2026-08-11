@@ -659,9 +659,9 @@ novato /switch online       # Groq only
 novato /switch both         # Groq + offline fallback (recommended)
 ```
 
-> **Privacy:** In online mode, Novato sends **only the text you type** (e.g.
-> "edit videos") to Groq. It never sends your actual commands, file paths,
-> usernames, or system details. See [Privacy](#13-privacy--what-is-and-isnt-sent-anywhere).
+> **Privacy:** Online mode initially sends only what you type. If Groq needs
+> local evidence, Novato shows a redacted preview and asks once for that session
+> before sending it. See [Privacy](#13-privacy--what-is-and-isnt-sent-anywhere).
 
 ---
 
@@ -791,13 +791,13 @@ If Novato is ever unsure whether something is safe, it refuses and explains why.
 |---|---|
 | **Basic** | **Nothing.** Ever. |
 | **Offline** | **Nothing.** The model runs locally. |
-| **Online (Groq)** | **Only the intent text you type** (e.g. "edit videos"). |
+| **Online (Groq)** | Your request, plus redacted local evidence only after preview and consent. |
 
-In online mode, Novato **never** sends:
-- your actual shell commands,
-- file paths, usernames, or hostname,
-- environment variables or system details,
-- your command history.
+In online mode, Novato removes credentials, usernames, hostnames, home paths,
+protected-file content, and sensitive dictionary fields before any local tool
+result is sent. The preview is shown locally first, and declining it falls back
+to deterministic Novato. Raw transcripts, stderr, model reasoning, and command
+history are never persisted as agent memory.
 
 The package names the AI suggests are checked against your **real local
 repositories** before anything is shown, so a slightly-off suggestion is simply
@@ -814,6 +814,7 @@ Everything lives under `~/.novato/`:
 |---|---|
 | `~/.novato/config.json` | Your settings + Groq key (file mode `600`). |
 | `~/.novato/history.log` | Append-only log of every executed command, timestamped. |
+| `~/.novato/agent-memory.jsonl` | Compact verified outcomes (file mode `600`). |
 | `~/.novato/engine/` | Downloaded offline llamafile model(s). |
 
 You can change the location by setting the `NOVATO_HOME` environment variable

@@ -7,6 +7,25 @@
 Novato (*"beginner"* in Spanish & Portuguese) makes the terminal human — without
 dumbing down the power Linux gives you.
 
+## Smart agent mode
+
+In Online or Both mode, Novato uses the hosted Groq model as a reasoning engine
+grounded in registered local tools. It is **not a separately trained Novato
+model**: Groq decides which evidence it needs, while Novato controls inspection,
+redaction, confirmation, execution, and verification.
+
+```bash
+novato chat                           # multi-turn maintenance session
+novato "why am I using the LTS kernel?" # smart one-shot diagnosis
+novato /memory                        # locally saved verified outcomes
+novato /forget all                    # remove saved agent memory
+```
+
+Read-only probes run locally. Before their results go online, Novato shows a
+redacted preview and asks once for that session. Every state-changing action is
+shown and confirmed separately, then verified locally. Groq failure or declined
+context consent falls back to Novato's deterministic features.
+
 ```text
 $ novato "i want to edit videos"
 
@@ -246,12 +265,12 @@ Unknown derivatives are auto-detected via `ID_LIKE`, so most remixes work too.
 |---|---|---|---|---|
 | **Basic** ⚡ | Rules + fuzzy match | instant | 100% local | nothing (always works) |
 | **Offline** 🔒 | llamafile (local LLM) | 3–8 s | 100% local | one-time model download |
-| **Online** ⚡ | Groq free API | ~200 ms | query only* | free email signup |
+| **Online** ⚡ | Groq API + local tools | fast | consented, redacted context* | API key |
 | **Both** ⭐ | Groq + llamafile fallback | best | best effort | both of the above |
 
-\* Novato never sends your actual commands, file paths, usernames, or system
-info to any online service — only the intent you type. See the
-[privacy policy](DOCUMENTATION.md#privacy).
+\* The initial request contains only what you type. Tool evidence is sent only
+after a redacted preview and per-session consent; secrets and identifying paths
+are removed. See the [privacy policy](DOCUMENTATION.md#privacy).
 
 ### Do I need the offline model if I have internet?
 

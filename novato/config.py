@@ -33,13 +33,13 @@ class Config:
     explain: bool = False
     mistake: bool = False
     groq_api_key: str = ""
-    groq_model: str = "llama-3.3-70b-versatile"
+    groq_model: str = "openai/gpt-oss-120b"
     llamafile_path: str = ""
     llamafile_model: str = ""
     setup_complete: bool = False
     tips_shown: bool = False
     learn_progress: dict[str, Any] = field(default_factory=dict)
-    version: int = 1
+    version: int = 2
     extra: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -93,6 +93,9 @@ def _coerce(raw: dict[str, Any]) -> Config:
     # Genuinely unknown keys (forward-compat from a newer version) go into extra.
     unknown = {k: v for k, v in raw.items() if k not in known and k != "extra"}
     cfg = Config(**kwargs)
+    # Loading an older schema is an in-memory migration; all known settings are
+    # preserved and the new version is written on the next normal config save.
+    cfg.version = max(cfg.version, 2)
     persisted_extra = raw.get("extra")
     if isinstance(persisted_extra, dict):
         cfg.extra.update(persisted_extra)

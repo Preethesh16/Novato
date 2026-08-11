@@ -256,7 +256,12 @@ class SetupWizard:
             self.ui.warn("Skipped Groq setup — you can add a key later with /setup.")
             return
         self.ui.info("Verifying key...")
-        if self._verify_groq(key):
+        verified = (
+            _default_verify_groq(key, cfg.groq_model)
+            if self._verify_groq is _default_verify_groq
+            else self._verify_groq(key)
+        )
+        if verified:
             cfg.groq_api_key = key
             self.ui.success("Key verified — Groq connected.")
         else:
@@ -431,11 +436,9 @@ def download_model_with_progress(spec, presenter: Presenter):
         return None
 
 
-def _default_verify_groq(key: str) -> bool:
-    """Verify a Groq key with a tiny live request. Returns False on any failure."""
-    backend = GroqBackend(key)
+def _default_verify_groq(key: str, model: str = "openai/gpt-oss-120b") -> bool:
+    """Verify the key and selected model's required local-tool support."""
+    backend = GroqBackend(key, model)
     if not backend.available:
         return False
-    # A trivial intent that should always return at least one candidate.
-    result = backend.resolve_intent("web browser")
-    return result.found
+    return backend.supports_agent_tools()

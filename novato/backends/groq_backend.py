@@ -7,11 +7,11 @@ a genuinely free tier (no credit card). This backend uses it for two jobs:
 * **Intent resolution** — turn a free-text request into candidate package names.
 * **Error analysis** — explain a failed command in plain English with a fix.
 
-Privacy (safety rules #4 & #5): we send **only the intent/error text** the user
-typed. We never send the user's actual commands, file paths, usernames,
-hostname, environment, or distro details. The candidate names Groq returns are
-then validated against the real local repositories by the searcher, so a
-slightly-off name simply gets filtered out rather than mis-installed.
+Legacy intent/error calls send only privacy-safe text. Smart agent calls can
+also send locally gathered evidence, but only after :mod:`novato.privacy`
+redacts it and the user approves the preview for that session. The candidate
+names Groq returns are validated against real repositories, and every proposed
+mutation remains subject to Novato's local policy and confirmation gates.
 
 Network and API failures never raise into the pipeline — they return an empty /
 ``None`` result so the router falls through to the next tier.
@@ -24,6 +24,7 @@ import re
 from typing import Optional
 
 from .basic_backend import IntentResult
+from ..agent_types import AgentMessage
 from ..task_intent import TASK_ACTIONS, TaskIntent
 
 try:  # requests is a core dependency, but guard so import never hard-fails.
@@ -104,7 +105,7 @@ class GroqBackend:
 
     name = "online"
 
-    def __init__(self, api_key: str, model: str = "llama-3.3-70b-versatile",
+    def __init__(self, api_key: str, model: str = "openai/gpt-oss-120b",
                  *, session=None) -> None:
         self._key = api_key
         self._model = model
@@ -142,6 +143,68 @@ class GroqBackend:
             return data["choices"][0]["message"]["content"]
         except Exception:
             return None
+
+    def agent_completion(
+        self, messages: list[dict], tools: list[dict], *, timeout: int = _TIMEOUT,
+        tool_choice: str = "auto",
+    ) -> Optional[AgentMessage]:
+        """Return one assistant step, including structured local tool calls."""
+        if not self.available:
+            return None
+        payload = {
+            "model": self._model,
+            "messages": messages,
+            "tools": tools,
+            "tool_choice": tool_choice,
+            "parallel_tool_calls": False,
+            "temperature": 0.1,
+            "max_tokens": 1024,
+        }
+        headers = {
+            "Authorization": f"Bearer {self._key}",
+            "Content-Type": "application/json",
+        }
+        try:
+            poster = self._session.post if self._session else requests.post
+            resp = poster(GROQ_URL, json=payload, headers=headers, timeout=timeout)
+            if resp.status_code != 200:
+                return None
+            message = resp.json()["choices"][0]["message"]
+            calls = []
+            for call in message.get("tool_calls") or []:
+                function = call.get("function") or {}
+                calls.append({
+                    "id": str(call.get("id", "")),
+                    "type": "function",
+                    "function": {
+                        "name": str(function.get("name", "")),
+                        "arguments": str(function.get("arguments", "{}")),
+                    },
+                })
+            return AgentMessage(
+                role="assistant", content=str(message.get("content") or ""),
+                tool_calls=calls,
+            )
+        except Exception:
+            return None
+
+    def supports_agent_tools(self) -> bool:
+        """Perform a tiny required-tool probe for setup/capability checks."""
+        tool = {
+            "type": "function",
+            "function": {
+                "name": "novato_capability_check",
+                "description": "Required no-op used only to verify local tool calling.",
+                "parameters": {"type": "object", "properties": {},
+                               "additionalProperties": False},
+            },
+        }
+        reply = self.agent_completion(
+            [{"role": "user", "content": "Call novato_capability_check now."}],
+            [tool], tool_choice="required",
+        )
+        return bool(reply and reply.tool_calls and
+                    reply.tool_calls[0]["function"]["name"] == "novato_capability_check")
 
     # -- Intent -------------------------------------------------------------
 

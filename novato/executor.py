@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import shlex
 import subprocess
+import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -36,6 +37,7 @@ class ExecResult:
     dry_run: bool = False
     blocked: bool = False
     reason: str = ""
+    elapsed_seconds: float = 0.0
 
     @property
     def succeeded(self) -> bool:
@@ -90,6 +92,80 @@ def execute(
     except OSError as exc:
         return ExecResult(run_cmd, 1, executed=True, reason=str(exc))
     return ExecResult(run_cmd, exit_code, executed=True)
+
+
+def execute_argv(
+    argv: list[str] | tuple[str, ...],
+    *,
+    dry_run: bool = False,
+    event: str = _logger.EVENT_EXEC,
+    note: str = "agent action",
+    on_progress: Optional[Callable[[float], None]] = None,
+) -> ExecResult:
+    """Execute an already policy-approved argument vector without a shell.
+
+    Agent actions use this entry point so pipes, redirects, substitutions, and
+    quoting tricks are data rather than shell syntax. The string safety layer
+    is still applied defensively before execution.
+    """
+    args = [str(arg) for arg in argv]
+    if not args or any("\x00" in arg or "\n" in arg for arg in args):
+        return ExecResult("", 1, executed=False, blocked=True,
+                          reason="invalid argument vector")
+    # Import lazily to avoid making the normal executor depend on the agent at
+    # module import time. Agent argv must pass both the narrow allowlist and the
+    # general destructive-command validator.
+    from .agent_tools import validate_action_argv
+
+    approved, policy_reason = validate_action_argv(args)
+    if not approved:
+        return ExecResult(shlex.join(args), 1, executed=False, blocked=True,
+                          reason=policy_reason)
+    command = shlex.join(args)
+    verdict = _safety.validate(command)
+    if not verdict.allowed:
+        return ExecResult(command, 1, executed=False, blocked=True,
+                          reason=verdict.reason)
+    # The agent policy rejects auto-confirm flags rather than silently changing
+    # an approved proposal after it was shown to the user.
+    if verdict.sanitized and verdict.sanitized != command:
+        return ExecResult(command, 1, executed=False, blocked=True,
+                          reason="auto-confirm flags are not allowed in agent actions")
+    if dry_run:
+        _logger.log_command(command, dry_run=True, note=note)
+        return ExecResult(command, 0, executed=False, dry_run=True,
+                          reason="dry-run: not executed")
+    _logger.log_event(event, command, note=note)
+    started = time.monotonic()
+    proc = None
+    try:
+        proc = subprocess.Popen(args)
+        next_update = 30.0
+        while True:
+            try:
+                code = proc.wait(timeout=1.0)
+                break
+            except subprocess.TimeoutExpired:
+                elapsed = time.monotonic() - started
+                if on_progress is not None and elapsed >= next_update:
+                    on_progress(elapsed)
+                    next_update += 30.0
+    except KeyboardInterrupt:
+        if proc is not None:
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                pass
+        return ExecResult(command, 130, executed=True, reason="cancelled by user",
+                          elapsed_seconds=time.monotonic() - started)
+    except FileNotFoundError as exc:
+        return ExecResult(command, 127, executed=True, reason=str(exc),
+                          elapsed_seconds=time.monotonic() - started)
+    except OSError as exc:
+        return ExecResult(command, 1, executed=True, reason=str(exc),
+                          elapsed_seconds=time.monotonic() - started)
+    return ExecResult(command, code, executed=True,
+                      elapsed_seconds=time.monotonic() - started)
 
 
 def _print_line(line: str) -> None:
