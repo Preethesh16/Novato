@@ -10,6 +10,7 @@ from rich.console import Console
 
 from novato import config as cfgmod
 from novato.agent import AgentSession
+from novato.agent_curriculum import BEHAVIOR_CURRICULUM, NOVATO_CAPABILITIES, build_agent_prompt
 from novato.agent_memory import MemoryStore, memory_path
 from novato.agent_tools import ToolRegistry, validate_action_argv
 from novato.agent_types import ActionProposal, AgentMessage, ToolResult
@@ -446,3 +447,15 @@ def test_groq_backend_parses_structured_tool_call():
     assert message.tool_calls[0]["function"]["name"] == "inspect_kernels"
     assert transport.payload["tool_choice"] == "auto"
     assert transport.payload["parallel_tool_calls"] is False
+
+
+def test_agent_curriculum_preserves_previous_novato_behavior():
+    prompt = build_agent_prompt("core safety")
+    for required in (
+        "propose_package_action", "never choose apt", "verified memory",
+        "Never start a second copy", "Arch is rolling release", "/clean storage",
+        "/mistake", "/explain", "Report success only after local verification",
+    ):
+        assert required in prompt
+    assert NOVATO_CAPABILITIES in prompt
+    assert BEHAVIOR_CURRICULUM in prompt

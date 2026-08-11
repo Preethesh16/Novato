@@ -36,6 +36,12 @@ and the project aims to follow [Semantic Versioning](https://semver.org/).
   correct distro command itself. Raw model-generated package-manager commands,
   wrong-distro tools such as `apt` on Arch, and repeated declined proposals are
   rejected.
+- Adds a compact agent behavior curriculum distilled from the earlier
+  maintenance session and Novato's existing feature set. It teaches workflow
+  selection, no-repeat/progress behavior, rolling-release and kernel
+  explanations, verification-backed memory, and handoff to `/clean storage`,
+  `/mistake`, `/explain`, `/learn`, and `/process` without treating historical
+  example values as current system facts.
 
 ### Smart storage workflow
 

@@ -71,6 +71,7 @@ responsibility and is independently testable.
 | `backends/groq_backend.py` | Online Groq inference. |
 | `backends/router.py` | Fallback chain online → offline → basic. |
 | `agent.py` | Bounded multi-turn reasoning loop, task ledger, approval and verification. |
+| `agent_curriculum.py` | Stable behavior examples and existing-capability guidance for Groq. |
 | `agent_tools.py` | Typed local probes, mutation allowlist, and recoverable config edits. |
 | `agent_memory.py` | `0600` JSONL store for verified outcomes only. |
 | `privacy.py` | Recursive online-context redaction. |
