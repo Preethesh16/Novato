@@ -10,39 +10,6 @@ and the project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Smart Groq-powered Linux agent
-
-- Adds `novato chat` and smart one-shot requests backed by a bounded eight-step
-  Groq local-tool loop; API failures and declined context consent fall back to
-  the existing deterministic flows.
-- Adds registered read-only probes for system, kernels, packages, storage,
-  services, networking, battery, processes, repository search, and constrained
-  configuration reading.
-- Adds typed, allowlisted action proposals. Read-only probes are automatic;
-  every mutation receives a default-No confirmation, runs without a shell,
-  streams output with elapsed-time updates, and is checked by a read-only
-  verification step.
-- Adds redacted per-session context consent and `0600` verified-outcome memory,
-  managed through `/memory` and `/forget`. Raw transcripts, model reasoning,
-  stderr, and unverified recommendations are not persisted.
-- Adds recoverable `KEY=value` edits for existing `/etc` configuration files,
-  including a unified-diff preview, timestamped backup, audit entries, and
-  post-write verification.
-- Changes the new-install Groq default to the tool-capable
-  `openai/gpt-oss-120b`; existing model selections remain untouched and setup
-  now verifies required local-tool support.
-- Grounds package actions in local evidence: familiar names such as `vscode`
-  resolve to the real installed package and source, and Novato derives the
-  correct distro command itself. Raw model-generated package-manager commands,
-  wrong-distro tools such as `apt` on Arch, and repeated declined proposals are
-  rejected.
-- Adds a compact agent behavior curriculum distilled from the earlier
-  maintenance session and Novato's existing feature set. It teaches workflow
-  selection, no-repeat/progress behavior, rolling-release and kernel
-  explanations, verification-backed memory, and handoff to `/clean storage`,
-  `/mistake`, `/explain`, `/learn`, and `/process` without treating historical
-  example values as current system facts.
-
 ### Smart storage workflow
 
 - Builds one measured recommended plan for package/log/download caches, shows

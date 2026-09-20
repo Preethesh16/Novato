@@ -55,11 +55,6 @@ as a default feature. That is Novato.
   "offline first / privacy first / works on 4 GB RAM" constraints alone.
 - **"Both" mode is highly recommended:** Groq primary with llamafile fallback —
   fast when online, private when offline, never broken.
-- **Groq is a hosted reasoning engine, not a newly trained Novato model:** the
-  model requests registered tools and proposes typed actions. Novato owns
-  redaction, confirmation, execution, verification, and persistent memory.
-- **Rules remain policy and fallback:** smart mode removes the predefined-rule
-  ceiling without delegating system truth or safety decisions to the model.
 
 ## Tooling decision (build-time)
 

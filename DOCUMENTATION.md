@@ -70,11 +70,6 @@ responsibility and is independently testable.
 | `backends/llamafile_backend.py` | Local offline LLM (llamafile). |
 | `backends/groq_backend.py` | Online Groq inference. |
 | `backends/router.py` | Fallback chain online → offline → basic. |
-| `agent.py` | Bounded multi-turn reasoning loop, task ledger, approval and verification. |
-| `agent_curriculum.py` | Stable behavior examples and existing-capability guidance for Groq. |
-| `agent_tools.py` | Typed local probes, mutation allowlist, and recoverable config edits. |
-| `agent_memory.py` | `0600` JSONL store for verified outcomes only. |
-| `privacy.py` | Recursive online-context redaction. |
 | `searcher.py` | Search AUR / apt-cache / pacman / dnf / zypper. |
 | `ranker.py` | Rank search results by relevance. |
 | `presenter.py` | Rich terminal UI + status badges. |
@@ -88,12 +83,6 @@ responsibility and is independently testable.
 | `cheat.py` | Static command cheat-sheets (`/cheat`). |
 | `sysinfo.py` | Disk + process inspection helpers (`/disk`, `/process`). |
 | `learner.py` | Interactive, distro-aware tutorial engine (`/learn`). |
-
-Package mutations are a typed special case: Groq supplies only the requested
-operation and familiar application name. Novato resolves the real installed
-package, origin (official repository or AUR), distro package manager, and exact
-command locally. Generic model-generated `apt`/`pacman`/`yay` commands are not
-accepted by the agent executor.
 
 ---
 
@@ -200,10 +189,8 @@ These are **absolute and non-negotiable**, enforced primarily by
    (`safety.validate` returns `Risk.BLOCKED`). A plain `rm` of **one specific,
    in-tree file/folder by name** is the sole exception: it is allowed but still
    requires the explicit default-No confirmation (`safety._safe_rm_target`).
-4. Never send local tool evidence to Groq without a redacted preview and
-   explicit per-session consent.
-5. Redact credentials, usernames, hostnames, home paths, and sensitive files;
-   never persist raw agent transcripts or model reasoning.
+4. Never send actual commands to Groq — only the intent/query.
+5. Never send file paths, usernames, or system info to any online service.
 6. Always log every executed command to `~/.novato/history.log`.
 7. Always respect `--dry-run` — `safety.confirm` returns `False` in dry-run.
 8. When unsure about safety, refuse and explain why.
@@ -220,11 +207,11 @@ These are **absolute and non-negotiable**, enforced primarily by
   "explain": false,
   "mistake": true,
   "groq_api_key": "gsk_...",
-  "groq_model": "openai/gpt-oss-120b",
+  "groq_model": "llama-3.3-70b-versatile",
   "llamafile_path": "/home/user/.novato/engine/phi3.llamafile",
   "llamafile_model": "phi3",
   "setup_complete": true,
-  "version": 2
+  "version": 1
 }
 ```
 
@@ -250,14 +237,9 @@ Event kinds: `EXEC`, `DRYRUN`, `FIX`, `DECLINE`, `SEARCH`.
 ## Privacy
 
 - **Basic** and **Offline** modes send nothing off the machine, ever.
-- **Online** mode initially sends only the request you type. When Groq requests
-  a registered local inspection, Novato runs it locally, shows the exact
-  redacted preview, and asks once per session before sending any result.
-- Credentials, usernames, hostnames, home paths, protected files, and sensitive
-  dictionary fields are removed. Declining consent returns to deterministic
-  local behavior.
-- Only compact, verified outcomes are saved to `agent-memory.jsonl`; raw chat,
-  stderr, model reasoning, and unverified recommendations are not persisted.
+- **Online** mode sends *only the intent text you type* (e.g. "edit videos") to
+  Groq. It never sends your actual commands, file paths, usernames, hostname,
+  environment, or history.
 - The Groq API key lives only in your local `config.json` (mode `0600`).
 
 ---
