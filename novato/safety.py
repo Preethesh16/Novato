@@ -18,6 +18,7 @@ here are pure and side-effect free so they are trivially testable.
 from __future__ import annotations
 
 import re
+import os
 import shlex
 from dataclasses import dataclass, field
 from enum import Enum
@@ -109,7 +110,7 @@ def _program_name(tokens: list[str]) -> str:
         # Skip env VAR=val assignments.
         while i < len(tokens) and "=" in tokens[i] and not tokens[i].startswith("-"):
             i += 1
-    return tokens[i] if i < len(tokens) else ""
+    return os.path.basename(tokens[i]) if i < len(tokens) else ""
 
 
 # Shell metacharacters that must never appear in a delete target — a non-shell
@@ -138,7 +139,7 @@ def _safe_rm_target(tokens: list[str]) -> bool:
     # Only the gentle flags; -rf/-fr never reach here (the pattern list blocks
     # them) but reject any unexpected flag to be safe.
     for f in flags:
-        if set(f.lstrip("-")) - set("rfiv"):
+        if set(f.lstrip("-")) - set("riv"):
             return False
     if len(paths) != 1:
         return False  # exactly one named target — no mass deletes
@@ -209,6 +210,11 @@ def validate(command: str) -> Verdict:
     command = command.strip()
     if not command:
         return Verdict(Risk.BLOCKED, reason="empty command", blocked_by="empty")
+
+    try:
+        shlex.split(command)
+    except ValueError:
+        return Verdict(Risk.BLOCKED, reason="Invalid command quoting", blocked_by="syntax")
 
     destructive, why = is_destructive(command)
     if destructive:

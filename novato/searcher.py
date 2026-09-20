@@ -22,6 +22,7 @@ executes an install — it only reads.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import urllib.parse
@@ -73,6 +74,7 @@ def _run(cmd: list[str]) -> tuple[int, str, str]:
             # otherwise a child run just before a y/N prompt can swallow the
             # user's piped answer and the confirmation silently sees EOF.
             stdin=subprocess.DEVNULL,
+            env={**os.environ, "LC_ALL": "C"},
         )
         return proc.returncode, proc.stdout, proc.stderr
     except (subprocess.TimeoutExpired, OSError) as exc:
@@ -150,14 +152,25 @@ def _parse_aur_json(raw: str) -> list[SearchResult]:
     if not isinstance(data, dict) or data.get("type") == "error":
         return []
     results = []
-    for item in data.get("results", []):
+    items = data.get("results")
+    if not isinstance(items, list):
+        return []
+    for item in items:
+        if not isinstance(item, dict) or not isinstance(item.get("Name"), str):
+            continue
+        if not item["Name"]:
+            continue
+        try:
+            popularity = float(item.get("Popularity", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            continue
         results.append(SearchResult(
             name=item.get("Name", ""),
             description=item.get("Description") or "",
             repo="AUR",
             version=item.get("Version", ""),
             source="aur",
-            popularity=float(item.get("Popularity", 0.0) or 0.0),
+            popularity=popularity,
             extra={"votes": item.get("NumVotes", 0),
                    "maintainer": item.get("Maintainer") or ""},
         ))
@@ -205,10 +218,16 @@ def search_dnf(query: str) -> list[SearchResult]:
     results = []
     for line in out.splitlines():
         line = line.strip()
-        if not line or line.startswith("=") or " : " not in line:
+        if "\t" in line:
+            # DNF5 uses a tab-delimited table instead of DNF4's colon rows.
+            name_part, _, desc = line.partition("\t")
+        elif " : " in line:
+            name_part, _, desc = line.partition(" : ")
+        else:
             continue
-        name_part, _, desc = line.partition(" : ")
-        name = name_part.split(".")[0].strip()  # strip .x86_64/.noarch arch.
+        if not name_part or name_part.startswith("="):
+            continue
+        name = name_part.rsplit(".", 1)[0].strip()  # strip .x86_64/.noarch arch.
         if not name:
             continue
         results.append(SearchResult(

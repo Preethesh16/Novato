@@ -977,7 +977,7 @@ class App:
         pm = self.system.package_manager
         if pm == "pacman":
             if origin == _installed.ORIGIN_AUR and self.system.aur_helper:
-                return f"{self.system.aur_helper} -S {package}"
+                return self._aur_command(package)
             return f"sudo pacman -S {package}"
         if pm == "apt":
             return f"sudo apt install --only-upgrade {package}"
@@ -987,11 +987,23 @@ class App:
             return f"sudo zypper update {package}"
         return f"{self.system.install_cmd} {package}"
 
+    def _aur_command(self, package: str) -> str:
+        helper = self.system.aur_helper
+        verb = "build" if helper == "pamac" else "-S"
+        return f"{helper} {verb} {package}"
+
     def _install(self, package: str, *, source: str = "") -> int:
         """Confirm and run the install (or update) command for a single package."""
         # Already on the system? Offer an update through the same source it
         # was installed from, instead of a blind reinstall.
         info = _installed.get_info(package, self.system.package_manager)
+        needs_aur = source == "aur" or (info is not None and info.origin == _installed.ORIGIN_AUR)
+        if needs_aur and not self.system.aur_helper:
+            self.ui.error(
+                "This package needs an AUR helper (such as yay or paru). "
+                "No helper was found; pacman cannot build AUR packages."
+            )
+            return 2
         if info is not None:
             origin = ("the AUR" if info.origin == _installed.ORIGIN_AUR
                       else "the official repos")
@@ -1006,7 +1018,7 @@ class App:
                 return 0
             command = self._update_command(package, info.origin)
         elif source == "aur" and self.system.aur_helper:
-            command = f"{self.system.aur_helper} -S {package}"
+            command = self._aur_command(package)
         else:
             command = f"{self.system.install_cmd} {package}"
 
@@ -1227,6 +1239,10 @@ class App:
                     + ", ".join(_dl.MODELS)
                 )
                 return 1
+
+        if self.dry_run:
+            self.ui.info(f"Would download {spec.name} ({spec.approx_size}) and enable offline mode.")
+            return 0
 
         if _dl.is_downloaded(spec):
             path = _dl.model_path(spec)

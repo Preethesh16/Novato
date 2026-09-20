@@ -12,6 +12,7 @@ candidate package names, and metadata for the presenter's status badge.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from .backends.basic_backend import BasicBackend, IntentResult
@@ -53,6 +54,15 @@ class IntentResolver:
         query = query.strip()
         if not query:
             return IntentPlan(query="", backend=self.backend_name)
+
+        # An explicit single package name must not be fuzzy-matched to a task
+        # (for example, "install tree" used to suggest theme switchers).
+        literal = re.fullmatch(r"install\s+([a-z0-9][a-z0-9+._-]*)", query, re.IGNORECASE)
+        if literal:
+            package = literal.group(1)
+            return IntentPlan(query=query, candidates=[package],
+                              matched_intent="explicit package", confidence=1.0,
+                              backend="basic")
 
         result: IntentResult = self._backend.resolve_intent(query)
         return IntentPlan(

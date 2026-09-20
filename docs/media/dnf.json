@@ -1,0 +1,24 @@
+{
+  "distro": "Fedora Linux 43 (Container Image)",
+  "pm": "dnf",
+  "scenes": [
+    {
+      "title": "Meet your system",
+      "command": "novato /status",
+      "output": "\n[Novato • Basic ⚡] current settings\n  Mode:     basic\n  Explain:  off\n  Mistake:  off\n  Distro:   Fedora Linux 43 (Container Image)\n  PM:       dnf\n  Shell:    bash\n",
+      "input": ""
+    },
+    {
+      "title": "Find a package and preview its command",
+      "command": "novato --dry-run install tree",
+      "output": "[Novato • Basic ⚡] Searching repositories...\n\nFound 1 option(s) for your system (Fedora Linux 43 (Container Image)):\n\n  [1] tree  — File system tree viewer  (dnf)\n\nPick [1-1] or 'q' to quit: \n📋 Will run: sudo dnf install tree\n(dry-run: nothing was executed)\n",
+      "input": "1\ny"
+    },
+    {
+      "title": "Understand the command",
+      "command": "novato /explain ls -la",
+      "output": "╭───────────── 💡 Explain mode ──────────────╮\n│    ls  = list what's in a folder           │\n│    -la = show all files, with full details │\n│                                            │\n╰────────────────────────────────────────────╯\n",
+      "input": ""
+    }
+  ]
+}

@@ -3,7 +3,7 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/Preethesh16/Novato/main/scripts/install.sh | bash
 #
-# Prefers pipx (isolated, recommended), falls back to pip --user. Never uses
+# Prefers pipx, then uv (both isolated). Never uses
 # sudo: Novato is a user tool and only asks for root when it installs a package
 # you confirmed.
 set -euo pipefail
@@ -28,19 +28,13 @@ install_with_pipx() {
     pipx install "git+${REPO}.git" --force
 }
 
-install_with_pip() {
-    info "Installing Novato with pip (--user)..."
-    python3 -m pip install --user --upgrade "git+${REPO}.git"
-}
-
 if command -v pipx >/dev/null 2>&1; then
     install_with_pipx
 elif command -v uv >/dev/null 2>&1; then
     info "Installing Novato with uv tool..."
     uv tool install "git+${REPO}.git"
 else
-    warn "pipx/uv not found; using pip --user. (pipx is recommended.)"
-    install_with_pip
+    die "Install pipx or uv with your distro package manager, then rerun this script. See README.md."
 fi
 
 echo

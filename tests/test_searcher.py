@@ -175,3 +175,29 @@ def test_candidates_exact_match_still_wins(monkeypatch):
     monkeypatch.setattr(searcher, "search", _fake_search_factory(index))
     found = searcher.search_candidates(["firefox"], "pacman")
     assert [r.name for r in found] == ["firefox"]
+
+
+def test_dnf_preserves_dots_in_package_names(monkeypatch):
+    monkeypatch.setattr(searcher, "_run", lambda cmd: (
+        0, "python3.12.x86_64 : Python interpreter\n", ""
+    ))
+    assert searcher.search_dnf("python3.12")[0].name == "python3.12"
+
+
+def test_aur_malformed_results_do_not_crash():
+    for raw in ('{"results":null}', '{"results":[null,42,"bad"]}',
+                '{"results":[{"Name":"foo","Popularity":"bad"}]}'):
+        assert searcher._parse_aur_json(raw) == []
+
+
+def test_parse_dnf5_live_output(monkeypatch):
+    sample = (
+        "Matched fields: name (exact)\n"
+        " bash.x86_64\tThe GNU Bourne Again shell\n"
+        "Matched fields: name, summary\n"
+        " python3.12.x86_64\tPython interpreter\n"
+    )
+    monkeypatch.setattr(searcher, "_run", lambda cmd: (0, sample, ""))
+    results = searcher.search_dnf("bash")
+    assert [r.name for r in results] == ["bash", "python3.12"]
+    assert results[0].description == "The GNU Bourne Again shell"

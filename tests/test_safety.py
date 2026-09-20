@@ -112,3 +112,12 @@ def test_sanitize_still_strips_autoconfirm():
     assert safety.sanitize("sudo pacman -S firefox --noconfirm") == \
         "sudo pacman -S firefox"
     assert "--noconfirm" not in safety.validate("sudo pacman -S vlc --noconfirm").sanitized
+
+
+@pytest.mark.parametrize("command", [
+    "/usr/bin/rm -r -v -f folder", "rm -r -v -f folder",
+    "/usr/bin/wipefs /dev/sda", "sudo /sbin/blkdiscard /dev/sda",
+    "echo 'unterminated",
+])
+def test_destructive_paths_and_malformed_commands_are_blocked(command):
+    assert not safety.validate(command).allowed

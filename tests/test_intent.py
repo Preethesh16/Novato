@@ -128,3 +128,16 @@ def test_lookup_helper():
 def test_describe_returns_string():
     assert "player" in intent_map.describe("vlc").lower()
     assert intent_map.describe("totally-unknown-pkg") == ""
+
+
+@pytest.mark.parametrize("package", ["tree", "bash", "python3.12", "libc++", "nodejs"])
+def test_explicit_package_is_not_reinterpreted_by_fuzzy_or_ai_backend(package):
+    from novato.intent import IntentResolver
+
+    class WrongBackend:
+        def resolve_intent(self, query):
+            pytest.fail("Explicit package requests must not go through fuzzy or AI matching")
+
+    plan = IntentResolver(WrongBackend()).resolve(f"install {package}")
+    assert plan.candidates == [package]
+    assert plan.confidence == 1.0

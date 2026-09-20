@@ -48,3 +48,15 @@ def test_get_info_official_origin(monkeypatch):
 def test_get_info_not_installed(monkeypatch):
     monkeypatch.setattr(installed, "_run", _fake_pacman_run)
     assert installed.get_info("vlc", "pacman") is None
+
+
+def test_apt_excludes_removed_and_unconfigured_packages(monkeypatch):
+    def run(cmd):
+        assert "${db:Status-Status}" in cmd[-1]
+        return 0, (
+            "bash\t5.2\tinstalled\n"
+            "old-app\t1.0\tconfig-files\n"
+            "broken-app\t2.0\tunpacked\n"
+        ), ""
+    monkeypatch.setattr(installed, "_run", run)
+    assert installed.installed_versions("apt") == {"bash": "5.2"}

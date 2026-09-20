@@ -63,3 +63,19 @@ def test_update_config_round_trips_cleanly(isolated_home):
     assert cfg.mode == "online"
     assert cfg.explain is True
     assert cfg.extra == {}
+
+
+@pytest.mark.parametrize("field,value", [
+    ("groq_api_key", None), ("llamafile_path", 42),
+    ("learn_progress", []), ("explain", "false"),
+    ("setup_complete", "false"), ("mode", []),
+])
+def test_invalid_field_types_fall_back_to_defaults(isolated_home, field, value):
+    import json
+    path = cfgmod.config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({field: value}))
+    cfg = cfgmod.load_config()
+    assert getattr(cfg, field) == getattr(cfgmod.Config(), field)
+    assert not cfg.has_groq
+    assert not cfg.has_llamafile

@@ -1,0 +1,90 @@
+DISTRO: Ubuntu 24.04.5 LTS | apt
+PASS: real repository search + installed bash 5.2.21-2ubuntu4
+
+$ novato --help
+usage: novato [-h] [--version] [--dry-run] [--analyze-error COMMAND EXIT_CODE]
+              [--download-model [MODEL]]
+              [words ...]
+
+Install software by describing what you want. From novato to pro.
+
+positional arguments:
+  words                 your request, e.g. "i want to edit videos", or a
+                        /command
+
+options:
+  -h, --help            show this help message and exit
+  --version             show program's version number and exit
+  --dry-run             show everything but never execute any command
+  --analyze-error COMMAND EXIT_CODE
+                        (internal) analyse a failed command; used by the shell
+                        hook
+  --download-model [MODEL]
+                        download an offline llamafile model (auto-selects by
+                        RAM if no name given) and enable offline mode
+
+$ novato --version
+novato 0.1.0
+
+$ novato /status
+
+[Novato • Basic ⚡] current settings
+  Mode:     basic
+  Explain:  off
+  Mistake:  off
+  Distro:   Ubuntu 24.04.5 LTS
+  PM:       apt
+  Shell:    bash
+
+$ novato /cheat files
+
+               📋 files — creating, copying, and deleting                
+┏━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Command                ┃ What it does                                 ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ touch file.txt         │ create a new empty file                      │
+│ mkdir myfolder         │ create a new folder                          │
+│ mkdir -p a/b/c         │ create nested folders in one go              │
+│ cp file.txt backup.txt │ copy a file                                  │
+│ cp -r folder/ backup/  │ copy a whole folder                          │
+│ mv old.txt new.txt     │ rename or move a file                        │
+│ cat file.txt           │ print a file to the screen                   │
+│ less file.txt          │ scroll through a long file (press q to quit) │
+│ nano file.txt          │ edit a file (save: Ctrl+O, exit: Ctrl+X)     │
+│ rm file.txt            │ delete a file — careful, there's no undo!    │
+└────────────────────────┴──────────────────────────────────────────────┘
+
+$ novato /man list files
+
+To list everything in this folder (including hidden files):
+   ls -la
+
+$ novato /explain ls -la
+╭───────────── 💡 Explain mode ──────────────╮
+│    ls  = list what's in a folder           │
+│    -la = show all files, with full details │
+│                                            │
+╰────────────────────────────────────────────╯
+
+$ novato /space
+
+💾 Storage on Ubuntu 24.04.5 LTS
+  Available: 5.8 GB
+  Used:      31.3 GB
+  Total:     39.1 GB
+
+To safely find cleanup options: novato clean storage safely
+
+$ novato --dry-run install bash
+[Novato • Basic ⚡] Searching repositories...
+
+Found 1 option(s) for your system (Ubuntu 24.04.5 LTS):
+
+  [1] bash  — GNU Bourne Again SHell  (apt)  ✓ installed
+
+Pick [1-1] or 'q' to quit: 
+bash is already installed (version 5.2.21-2ubuntu4, from the official repos).
+Update it through the same source? [Y/n]: 
+📋 Will run: sudo apt install --only-upgrade bash
+(dry-run: nothing was executed)
+PASS: CLI smoke checks (package changes were dry-run only)

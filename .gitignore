@@ -31,3 +31,6 @@ htmlcov/
 # Novato runtime data (never commit user config, keys, or history)
 .novato/
 *.llamafile
+
+# Reproducible container build diagnostics (validation summaries are tracked)
+docs/validation/*-build.log

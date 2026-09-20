@@ -51,7 +51,18 @@ def installed_versions(package_manager: str) -> dict[str, str]:
     if package_manager == "pacman":
         rc, out, _ = _run(["pacman", "-Q"])
     elif package_manager == "apt":
-        rc, out, _ = _run(["dpkg-query", "-W", "-f", "${Package} ${Version}\n"])
+        rc, out, _ = _run([
+            "dpkg-query", "-W", "-f",
+            "${Package}\t${Version}\t${db:Status-Status}\n",
+        ])
+        if rc != 0:
+            return {}
+        versions = {}
+        for line in out.splitlines():
+            fields = line.split("\t")
+            if len(fields) == 3 and fields[2] == "installed":
+                versions[fields[0]] = fields[1]
+        return versions
     elif package_manager in ("dnf", "zypper"):
         rc, out, _ = _run(["rpm", "-qa", "--qf", "%{NAME} %{VERSION}-%{RELEASE}\n"])
     else:

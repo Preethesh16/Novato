@@ -1,0 +1,45 @@
+........................................................................ [ 16%]
+........................................................................ [ 33%]
+........................................................................ [ 50%]
+........................................................................ [ 67%]
+........................................................................ [ 84%]
+...................................................................      [100%]
+================================ tests coverage ================================
+_______________ coverage: platform linux, python 3.10.21-final-0 _______________
+
+Name                                   Stmts   Miss  Cover
+----------------------------------------------------------
+novato/__init__.py                         4      0   100%
+novato/backends/__init__.py                2      0   100%
+novato/backends/basic_backend.py         103      4    96%
+novato/backends/groq_backend.py          108     14    87%
+novato/backends/llamafile_backend.py      75     33    56%
+novato/backends/router.py                 87     23    74%
+novato/cheat.py                           18      0   100%
+novato/config.py                          98      9    91%
+novato/detector.py                        86     11    87%
+novato/downloader.py                     113     18    84%
+novato/executor.py                        43      6    86%
+novato/howto.py                           92      3    97%
+novato/installed.py                       51      3    94%
+novato/intent.py                          39      3    92%
+novato/intent_map.py                      25      0   100%
+novato/learner.py                        227     28    88%
+novato/logger.py                          39      4    90%
+novato/main.py                           836    293    65%
+novato/presenter.py                      346     59    83%
+novato/ranker.py                          53      4    92%
+novato/rules.py                          228     48    79%
+novato/safety.py                         110      4    96%
+novato/searcher.py                       184     33    82%
+novato/setup_wizard.py                   212     39    82%
+novato/storage.py                        189     33    83%
+novato/storage_analyzer.py               392     39    90%
+novato/switcher.py                        19      4    79%
+novato/sysinfo.py                        132     31    77%
+novato/task_intent.py                     14      0   100%
+novato/teacher.py                         81      7    91%
+novato/watcher.py                         86     17    80%
+----------------------------------------------------------
+TOTAL                                   4092    770    81%
+427 passed in 7.73s

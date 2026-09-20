@@ -793,14 +793,19 @@ def test_storage_workflow_physically_reclaims_temp_files_five_times(
             return ExecResult(command, 1, executed=True)
         return ExecResult(command, 0, executed=True)
 
+    initial_allocated = mainmod._storage.directory_bytes(str(home))
+    settled = []
     real_settle = mainmod._storage.settle_capacity
+
+    def record_settle(snapshot, path):
+        result = real_settle(snapshot, path, min_wait=0, stable_for=0, max_wait=0.1,
+                             trash_pending=lambda trash_path: False)
+        settled.append(result)
+        return result
     monkeypatch.setattr(mainmod._storage, "deep_scan", scan)
     monkeypatch.setattr(
         mainmod._storage, "settle_capacity",
-        lambda snapshot, path: real_settle(
-            snapshot, path, min_wait=0, stable_for=0, max_wait=0.1,
-            trash_pending=lambda trash_path: False,
-        ),
+        record_settle,
     )
     monkeypatch.setattr(mainmod._sysinfo, "disk_mounts", lambda: [])
     monkeypatch.setattr(mainmod._sysinfo, "has_ncdu", lambda: True)
@@ -817,9 +822,12 @@ def test_storage_workflow_physically_reclaims_temp_files_five_times(
     assert scan_count == 2
     assert not any(trash_files.iterdir())
     assert all(not os.path.lexists(item.path) for item in [recommended, *reviewed])
-    assert capacities[-1].free - capacities[0].free >= 24 * 1024**2
-    final_free = shutil.disk_usage(home).free
-    assert format_bytes(final_free) in capsys.readouterr().out
+    # Other processes can allocate on the same filesystem during this test.
+    # Verify our own real blocks were removed, then check the exact sample
+    # shown by the UI instead of a later, unrelated global free-space sample.
+    assert initial_allocated - mainmod._storage.directory_bytes(str(home)) >= 24 * 1024**2
+    assert settled
+    assert format_bytes(settled[-1].free_bytes) in capsys.readouterr().out
 
 
 def test_reviewed_trash_estimate_includes_existing_trash():
@@ -1074,3 +1082,42 @@ def test_actual_deletion_removes_the_real_file(arch_system, isolated_home, monke
     app = _scripted_app(arch_system, ["y"], monkeypatch)  # confirm the delete
     app.run_query("delete throwaway.txt")
     assert not target.exists()
+
+
+@pytest.mark.parametrize("already_installed", [False, True])
+def test_aur_without_helper_does_not_fall_back_to_pacman(
+    arch_system, isolated_home, monkeypatch, already_installed
+):
+    from dataclasses import replace
+    from novato import installed
+    system = replace(arch_system, aur_helper=None)
+    monkeypatch.setattr(installed, "get_info", lambda *args: (
+        installed.InstalledInfo("demo-bin", "1", installed.ORIGIN_AUR)
+        if already_installed else None
+    ))
+    monkeypatch.setattr("novato.main.execute", lambda *args, **kwargs:
+                        pytest.fail("AUR must not be installed through pacman"))
+    app = _scripted_app(system, ["y", "y"], monkeypatch)
+    assert app._install("demo-bin", source="aur") == 2
+
+
+def test_pamac_uses_build_for_aur(arch_system, isolated_home, monkeypatch):
+    from dataclasses import replace
+    from novato import installed
+    monkeypatch.setattr(installed, "get_info", lambda *args: None)
+    captured = []
+    monkeypatch.setattr("novato.main.execute", lambda cmd, **kwargs: captured.append(cmd))
+    app = _scripted_app(replace(arch_system, aur_helper="pamac"), [], monkeypatch, dry_run=True)
+    assert app._install("demo-bin", source="aur") == 0
+    assert captured == ["pamac build demo-bin"]
+
+
+def test_dry_run_model_download_does_not_download_or_save(
+    arch_system, isolated_home, monkeypatch
+):
+    monkeypatch.setattr("novato.setup_wizard.download_model_with_progress", lambda *args:
+                        pytest.fail("dry-run downloaded a model"))
+    monkeypatch.setattr(cfgmod, "update_config", lambda **kwargs:
+                        pytest.fail("dry-run changed config"))
+    app = _scripted_app(arch_system, [], monkeypatch, dry_run=True)
+    assert app.download_model("tinyllama-1.1b") == 0

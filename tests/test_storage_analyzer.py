@@ -155,7 +155,10 @@ def test_analyzer_does_not_double_count_inode_across_two_cache_roots(tmp_path):
     ".cargo/git/db/repository/objects/pack",
     ".gradle/wrapper/dists/gradle/bin/gradle",
 ])
-def test_analyzer_finds_cross_distro_ecosystem_caches(tmp_path, relative):
+@pytest.mark.parametrize("have_gio", [True, False])
+def test_analyzer_finds_cross_distro_ecosystem_caches(tmp_path, relative, monkeypatch, have_gio):
+    monkeypatch.setattr(storage_analyzer.shutil, "which",
+                        lambda tool: "/usr/bin/gio" if tool == "gio" and have_gio else None)
     cached = tmp_path / relative
     cached.parent.mkdir(parents=True, exist_ok=True)
     _allocate(cached)
@@ -172,8 +175,9 @@ def test_analyzer_finds_cross_distro_ecosystem_caches(tmp_path, relative):
     }
     root = str(tmp_path / expected_roots[relative])
     assert candidates[root].category == "download cache"
-    assert candidates[root].action == "move to Trash"
-    assert candidates[root].recommended is True
+    assert candidates[root].action == ("move to Trash" if have_gio else "review")
+    assert bool(candidates[root].command) == have_gio
+    assert candidates[root].recommended is have_gio
 
 
 def test_smart_ranking_prefers_large_safe_cache_over_old_personal_archive(

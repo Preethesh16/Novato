@@ -1,347 +1,275 @@
+<div align="center">
+
 # Novato 🌱
 
-> **From novato to pro.**
-> A Linux terminal companion that lets you install software by describing what
-> you want, quietly catches your mistakes, and teaches you Linux as you go.
+### Your words. Your distro. Your terminal.
 
-Novato (*"beginner"* in Spanish & Portuguese) makes the terminal human — without
-dumbing down the power Linux gives you.
+Install by intent, understand commands, and learn Linux as you go.
 
-```text
-$ novato "i want to edit videos"
+[![Tests](https://github.com/Preethesh16/Novato/actions/workflows/tests.yml/badge.svg)](https://github.com/Preethesh16/Novato/actions/workflows/tests.yml)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
+![Linux](https://img.shields.io/badge/made_for-Linux-67d5f5)
+[![License: GPL v3+](https://img.shields.io/badge/license-GPLv3%2B-green)](LICENSE)
 
-[Novato • Basic ⚡] Searching repositories...
+[Get started](#get-started) · [Watch the demo](#watch-it-work) · [Command guide](#your-command-guide) · [Testing](docs/TESTING.md)
 
-Found 4 options for your system (Arch Linux):
+</div>
 
-  [1] kdenlive   — Powerful non-linear video editor by KDE   (official repo)
-  [2] shotcut    — Free, cross-platform video editor          (official repo)
-  [3] openshot   — Beginner-friendly video editor             (AUR)
-  [4] davinci-resolve — Professional editor by Blackmagic      (AUR)
-
-Pick [1-4] or 'q' to quit: 2
-
-📋 Will run: sudo pacman -S shotcut
-Confirm? [y/N]: y
-✅ Installing shotcut...
-```
-
----
-
-## What it does
-
-Novato is a full terminal companion for newcomers:
-
-1. **Install by intent** — type what you *want* ("a private browser"), not the
-   exact package name. Novato detects your distro, searches the right
-   repositories, and shows you the exact command before running anything.
-2. **Do tasks in plain English** — *"unzip this file"*, *"rename a file"*,
-   *"why is my disk full"*. Novato gives you the one simple command for the job
-   and offers to run it. A beginner knows the *task*, not the command name —
-   so describe the task.
-3. **Catch mistakes** — an opt-in, *silent* watcher only speaks when a command
-   fails. It explains the error in plain English and offers a fix.
-4. **Learn, the easy way** — a step-by-step `/learn` tutorial (one command at a
-   time, with a check that it landed), instant `/cheat` references, and
-   `/explain ls -la` to break down *any* command flag by flag.
-
-### Beyond installing — describe the task
-
-```text
-$ novato "unzip messi file"
-
-To unpack a .zip file:
-   unzip messi.zip
-Confirm? [y/N]:
-
-$ novato "why is my disk full"
-💾 Disk space + the biggest folders eating your space...
-
-$ novato /explain chmod 755 script.sh
-💡 chmod = change permissions · 755 = owner can do everything, others can read/run
-```
-
-You don't have to remember command names — but Novato teaches them as you go, so
-one day you won't need it. That's the point.
-
----
-
-## Install
-
-The recommended way is to install straight from GitHub as a **global `novato`
-command** — no PyPI account, no `uv run` prefix. Use a CLI installer
-(`pipx` or `uv`) so it lands in its own isolated environment and on your `PATH`:
+**Novato** means *beginner* in Spanish and Portuguese. Describe what you need;
+Novato finds packages for your Linux distribution, shows the command, and asks
+before running it. You can also look up commands, take a guided tutorial, inspect
+storage, or enable an opt-in shell error helper.
 
 ```bash
-# Option A — pipx (most distros)
+novato "i want to edit videos"
+novato /explain ls -la
+novato "check space"
+```
+
+No AI account is required. **Basic mode** resolves requests locally with rules
+and fuzzy matching. Repository searches, package downloads, and optional online
+AI may still need a network connection.
+
+## Watch it work
+
+![Novato installation previews on Arch, Ubuntu, Fedora, and openSUSE](docs/media/novato-demo.gif)
+
+**[Watch / download the 72-second video](docs/media/novato-demo.mp4)** ·
+[Captures and reproduction instructions](docs/media/README.md)
+
+These are rendered captures of **real CLI runs in Linux containers**, using
+live package metadata. Package actions use `--dry-run`: the video demonstrates
+finding software and previewing the correct command, not completed installs.
+The full video also shows distro detection and command explanations. It has
+on-screen text and no audio.
+
+| Arch · pacman | Ubuntu · apt |
+|---|---|
+| ![Arch package preview](docs/media/pacman-1.png) | ![Ubuntu package preview](docs/media/apt-1.png) |
+| **Fedora · dnf** | **openSUSE · zypper** |
+| ![Fedora package preview](docs/media/dnf-1.png) | ![openSUSE package preview](docs/media/zypper-1.png) |
+
+## Get started
+
+You need **Linux, Python 3.10+, Git**, and either **pipx** or **uv**. Use your
+distro's packages to install prerequisites; keep Novato in an isolated tool
+environment instead of modifying the system Python.
+
+### 1. Install the command
+
+With pipx:
+
+```bash
 pipx install git+https://github.com/Preethesh16/Novato.git
-pipx ensurepath          # one-time: makes `novato` available in new shells
+pipx ensurepath
+```
 
-# Option B — uv
+Or with uv:
+
+```bash
 uv tool install git+https://github.com/Preethesh16/Novato.git
-uv tool update-shell     # one-time PATH setup
+uv tool update-shell
+```
 
-# Then, from anywhere:
+Open a new terminal after the PATH step, then check:
+
+```bash
+novato --version
 novato --help
 ```
 
-> Don't have an installer yet? `python -m pip install --user pipx` (or grab `uv`
-> from <https://astral.sh/uv>). On Arch/Manjaro you can also `sudo pacman -S
-> python-pipx`. Plain `pip install --user` fails on modern Linux because the
-> system Python is externally managed — that's what `pipx`/`uv` exist to solve.
+The repository is the installation source; a PyPI or AUR release is not required.
+The optional [installer script](scripts/install.sh) uses pipx or uv and stops with
+an explanation if neither is available.
+
+### 2. Choose Basic mode
+
+Your first normal command launches setup. Select **Basic** to begin without an
+API key or model download. You can rerun setup with `novato /setup`.
 
 ```bash
-# Update later, or remove:
-pipx upgrade novato       # (uv: uv tool upgrade novato)
-pipx uninstall novato     # (uv: uv tool uninstall novato)
+novato /status
+novato /cheat files
+novato /explain ls -la
 ```
 
-**From source (for hacking on Novato):**
+### 3. Preview an install
+
+```bash
+novato --dry-run "i want to edit videos"
+```
+
+Choose a numbered result. Novato prints the command for your package manager,
+without executing it. Then, when you want to install:
+
+```bash
+novato "i want to edit videos"
+```
+
+Read the result list, select a package, review the exact command, and confirm.
+The package manager can ask for your password and its own confirmation. On Arch,
+Novato also offers a full system refresh; review the upgrade before accepting.
+Press `q` at a selection menu to leave it.
+
+### Update or uninstall Novato
+
+Use the same tool you installed it with:
+
+| Tool | Update | Remove |
+|---|---|---|
+| pipx | `pipx upgrade novato` | `pipx uninstall novato` |
+| uv | `uv tool upgrade novato` | `uv tool uninstall novato` |
+
+If you enabled the shell watcher, run `novato /mistake off` **before** uninstalling
+and open a new terminal. Configuration and history remain in `~/.novato` unless
+you remove them yourself. The [uninstaller](scripts/uninstall.sh) also offers to
+remove them.
+
+## Your command guide
+
+Always prefix slash commands with `novato` in your shell.
+
+| What you need | Try this | What happens |
+|---|---|---|
+| Find software | `novato "a private browser"` | Ranked package choices for your distro |
+| Install a known package | `novato "install tree"` | Repository lookup and command confirmation |
+| Remove a package | `novato "uninstall firefox"` | Matches installed packages, then asks |
+| Learn a command | `novato /explain chmod 755 script.sh` | Breaks down the command and flags |
+| Find a task command | `novato /man "extract a tar file"` | Shows instructions without execution |
+| Do a task | `novato /do "rename a file"` | Shows a proposed command; may request details |
+| Learn interactively | `novato /learn` | Guided lessons with saved progress |
+| Get a reference | `novato /cheat files` | Short command reference |
+| Check free space | `novato /space` | Read-only capacity report |
+| Review cleanup | `novato /disk` | Deep scan and proposed cleanup actions |
+| Inspect a port | `novato /process 8080` | Process information, with a separate stop offer |
+| Explain installs | `novato /explain on` | Enables teaching blocks for installs |
+| Catch shell errors | `novato /mistake on` | Installs an opt-in Bash/Zsh hook |
+| Change AI mode | `novato /switch basic` | Selects Basic, Online, Offline, or Both |
+| See settings | `novato /status` | Mode, distro, package manager, and shell |
+| Repeat setup | `novato /setup` | Optional AI and helper configuration |
+| See command list | `novato /help` | Built-in reference |
+
+### Clean storage with context
+
+Start with `novato /space` for a quick answer. Use `novato --dry-run /disk` to
+inspect the cleanup workflow before allowing changes. Deep scans may take time.
+
+The cleanup flow measures disk usage, identifies known download caches, and
+shows a ranked plan with exact actions. The recommended batch requires
+confirmation. Items that need your judgment—projects, models, build trees,
+archives, and personal files—are reviewed separately. Select multiple review
+rows with spaces, commas, or a range, such as `2 4 6` or `2-4`.
+
+Eligible file actions move items to Trash first. Emptying Trash has its own
+irreversible confirmation. Novato rechecks free space afterward; reclaimed
+space may differ from estimates, especially with open files or asynchronous
+Trash deletion. Read the [storage guide](USERMANUAL.md) before a large cleanup.
+
+### Make mistakes, then learn from them
+
+```bash
+novato /mistake on
+# Open a new Bash or Zsh session to load the hook.
+novato /mistake off
+```
+
+The watcher responds to failed commands. It can suggest a correction and explain
+it; you still review the proposed fix. Bash and Zsh are the supported hook
+shells. The complete workflow is in the [user manual](USERMANUAL.md).
+
+## Linux families
+
+| Family | Examples recognized by detection | Package manager |
+|---|---|---|
+| Arch | Arch, Manjaro, EndeavourOS, Garuda, Artix | `pacman` |
+| Debian | Debian, Ubuntu, Mint, Pop!_OS, elementary, Zorin, Kali, Raspbian | `apt` |
+| Fedora | Fedora, RHEL, Rocky, AlmaLinux, CentOS | `dnf` |
+| openSUSE | Tumbleweed, Leap, SLES | `zypper` |
+
+Derivatives can resolve through `ID_LIKE` in `/etc/os-release`. Recognition does
+not guarantee that every version or repository offers the same packages.
+AUR packages need an installed helper; Novato does not send AUR-only packages
+to pacman. Unsupported distributions cannot use the package installation flow.
+
+See the [validation report](docs/TESTING.md) for the exact environments exercised,
+commands checked, and remaining gaps. Container tests are not full desktop tests.
+
+## Optional AI
+
+| Mode | How it works | What you need |
+|---|---|---|
+| **Basic** | Local rules and fuzzy matching | Nothing extra |
+| **Offline** | Local llamafile model | One-time model download and enough RAM |
+| **Online** | Hosted Groq API | Network access and a Groq API key |
+| **Both** | Groq, then local model, then Basic fallback | Optional key and local model |
+
+```bash
+novato /setup                   # configure optional AI
+novato --download-model        # choose a model based on RAM
+novato /switch offline
+novato /switch basic
+```
+
+This version uses AI for intent resolution and explanations. The later agent
+chat and agent-memory features were removed when restoring the requested
+`57a01f4` baseline. Commands such as `novato chat` and `/memory` are not features
+of this version.
+
+Basic processing stays local. Online mode sends request data to Groq; don't put
+secrets in prompts or error text. The key is stored in `config.json` with `0600`
+permissions. Model downloads require network access even though subsequent
+local inference is offline. See [architecture and privacy](DOCUMENTATION.md).
+
+## Review before running
+
+Novato previews state-changing commands and asks for confirmation. Its safety
+layer blocks known destructive patterns and strips common auto-confirm flags.
+These checks are guardrails, not a general-purpose security sandbox. Review
+commands, package sources, and the consequences of system upgrades yourself.
+
+`--dry-run` previews package/task execution and model download actions. It can
+still perform searches, scans, write logs, and enter configuration flows. It is
+not a promise of zero filesystem writes. Execution history is stored in
+`~/.novato/history.log`; `NOVATO_HOME` can select a separate configuration folder.
+
+## Troubleshooting
+
+| Symptom | Next step |
+|---|---|
+| `novato: command not found` | Run your installer's PATH step above, then open a new shell |
+| Python is “externally managed” | Use pipx or uv tool installation; avoid system `pip install` |
+| No live repository results | Check connectivity and package metadata; offline candidates are suggestions, not verified availability |
+| AUR helper missing | Set up a helper yourself, or choose an official repository package |
+| Online AI fails | Check your key with `/setup`, or use `/switch basic` |
+| Local model unavailable | Check `/status`; download/configure it or use Basic mode |
+| Watcher doesn't appear | Open a fresh Bash/Zsh session after `/mistake on` |
+| Storage space didn't increase as expected | Check `/space` after deletion settles; files can remain open |
+
+## Develop and test
 
 ```bash
 git clone https://github.com/Preethesh16/Novato.git
 cd Novato
-uv sync                   # create env + install deps
+uv sync --frozen
 uv run novato --help
-uv run pytest             # run the test suite
+uv run pytest --cov=novato --cov-report=term-missing
+uv run ruff check .
+uv build
 ```
+
+Use a temporary `NOVATO_HOME` when testing to keep your normal configuration
+separate. The automated suite mocks destructive actions, AI APIs, and downloads.
+Real repository checks run in disposable Docker containers:
 
 ```bash
-# Coming soon, once published:
-pip install novato        # PyPI
-yay -S novato             # Arch User Repository
+bash scripts/test-distros.sh apt
+bash scripts/test-distros.sh dnf
+bash scripts/test-distros.sh pacman
+bash scripts/test-distros.sh zypper
 ```
 
-First run launches a one-time setup wizard. You can skip it and stay on **Basic
-mode**, which works instantly with zero internet and zero AI. To enable the
-fully-offline local LLM at any time:
+[Testing and limitations](docs/TESTING.md) · [Full user manual](USERMANUAL.md) ·
+[Architecture](DOCUMENTATION.md) · [Changelog](CHANGELOG.md) · [Roadmap](ROADMAP.md)
 
-```bash
-novato --download-model     # auto-picks a model for your RAM, then enables offline mode
-```
-
----
-
-## Quick start — all three features
-
-```bash
-# 1. Install by intent
-novato "i want to edit photos"
-
-# 2. Teaching mode
-novato /explain on
-novato "install vlc"
-
-# 3. Silent error watcher (hooks into your shell)
-novato /mistake on
-sudo pacmna -S vlc        # typo → Novato catches it and suggests the fix
-```
-
----
-
-## Slash commands
-
-| Command | What it does |
-|---|---|
-| `/do "<task>"` | Do a terminal task by describing it (e.g. `/do "rename a file"`) |
-| `/man "<task>"` | Show the one command for a task — no execution, just the answer |
-| `/learn` | Interactive, step-by-step terminal tutorial (distro-aware) |
-| `/cheat [topic]` | Quick command reference (`files`, `network`, `shortcuts`, …) |
-| `/explain <command>` | Explain any command flag by flag (e.g. `/explain ls -la /etc`) |
-| `/explain [on\|off]` | Toggle teaching mode on installs |
-| `/disk` | Deep-scan storage, offer safe distro-aware cleanup, then verify free space |
-| `/space` | Quickly show total, used, and available storage (read-only) |
-| `/clean storage` | Run the safe deep-scan and cleanup workflow |
-| `/process [port]` | See what's running, or what's using a port — and stop it |
-| `/switch [online\|offline\|both\|basic]` | Change AI mode (no arg shows a menu) |
-| `/mistake [on\|off]` | Toggle the silent error watcher |
-| `/status` | Show current mode, toggles, distro, and shell |
-| `/setup` | Re-run the first-time setup wizard |
-| `/help` | Show all commands |
-
-> **Tip:** anything `/do` and `/man` can do, you can also just *type* — `novato
-> "unzip this file"` works the same. `/disk` and `/process` are named shortcuts
-> for `novato "why is my disk full"` and `novato "what's using port 8080"`. The
-> slash forms are there for when you want to be explicit.
-
-### Smart storage cleanup
-
-Use `novato check space` for an immediate read-only capacity report. Use
-`novato clean storage safely`, ask `novato "free storage for me"`, or run
-`novato /disk` for cleanup. Novato detects the package manager used by Arch,
-Ubuntu/Debian, or Fedora, then:
-
-1. performs a read-only deep scan and shows current free space, large folders,
-   and the biggest application-cache areas;
-2. identifies measurable cleanup such as downloaded package files, Trash, and
-   oversized old system logs;
-3. shows one ranked recommended plan with every exact command, then runs the
-   whole plan after one default-No confirmation;
-4. opens a second judgment-required table where you can select several rows at
-   once (`13 15 17`, `13,15,17`, or `13-17`) and approve that batch once;
-5. empties Trash only after a separate irreversible confirmation, waits for
-   asynchronous deletion to settle, and reports current free space again.
-
-The cleanup is ranked rather than dumped as a folder list: Novato first builds
-a high-confidence plan from structurally known developer download caches, then
-keeps generic application caches, SDKs, build trees, duplicates, archives,
-models, projects, and personal files in a separate judgment-required review
-tier.
-
-On Arch, Novato uses `paccache`'s read-only preview when available, so it only
-quotes package archives that can really be pruned instead of the entire pacman
-cache. A detected `yay` build directory is explained and offered separately via
-`yay -Sc --aur`. Recovery is measured on both `/` and `/home`, which may be
-different filesystems.
-
-Personal files and arbitrary application-cache folders are review-only. Novato
-does not guess that Downloads, projects, photos, or offline app data are junk.
-
-The deep scan is distro-independent: it walks the home filesystem without
-following symlinks or crossing mounts, inspects modification age and file type,
-recognises source repositories and configuration as important, aggregates
-generated trees such as `node_modules`, virtual environments, Gradle caches,
-NPM/NPX, Yarn Berry, Cargo registry/git caches, and compiler output, and
-content-hashes same-sized large files before reporting
-them as duplicates. It also inventories the root filesystem separately and
-protects system-managed areas. File paths and hashes never leave the machine.
-
-After the recommended plan, Novato offers an interactive drill-down menu. Pick
-one or several candidates to see measured size, newest-content age,
-classification evidence, and exact proposed actions. Generated project folders
-and old files are moved to Trash first; Android platforms, build-tools, system
-images, and virtual devices are handled with `sdkmanager`/`avdmanager`. No batch
-runs until its default-No confirmation.
-
-Novato excludes Trash from the candidate inventory, removes overlapping
-parent/child actions, protects the `~/.gradle` configuration root while still
-offering its cache subtrees, and measures allocated blocks rather than sparse
-apparent file sizes. The final capacity sample is taken after analysis and a
-bounded Trash-settling period so it matches the filesystem's current state.
-
-Storage routing uses Novato's intent system rather than a substring shortcut.
-Online and Offline modes ask their language model to classify the user's goal;
-Basic mode falls back to private concept, synonym, and typo-aware matching. This
-keeps paraphrases working while preventing requests such as "clean this code"
-or "install a disk usage tool" from launching storage cleanup.
-
----
-
-## Supported distros
-
-| Family | Distros | Package manager | AUR |
-|---|---|---|---|
-| Arch | Arch, Manjaro, EndeavourOS, Garuda, Artix | `pacman` (+ `yay`/`paru`) | ✅ |
-| Debian | Debian, Ubuntu, Mint, Pop!_OS, elementary, Zorin, Kali | `apt` | — |
-| Fedora | Fedora, RHEL, Rocky, AlmaLinux, CentOS | `dnf` | — |
-| openSUSE | Leap, Tumbleweed, SLES | `zypper` | — |
-
-Unknown derivatives are auto-detected via `ID_LIKE`, so most remixes work too.
-
----
-
-## AI modes
-
-| Mode | Engine | Speed | Privacy | Needs |
-|---|---|---|---|---|
-| **Basic** ⚡ | Rules + fuzzy match | instant | 100% local | nothing (always works) |
-| **Offline** 🔒 | llamafile (local LLM) | 3–8 s | 100% local | one-time model download |
-| **Online** ⚡ | Groq free API | ~200 ms | query only* | free email signup |
-| **Both** ⭐ | Groq + llamafile fallback | best | best effort | both of the above |
-
-\* Novato never sends your actual commands, file paths, usernames, or system
-info to any online service — only the intent you type. See the
-[privacy policy](DOCUMENTATION.md#privacy).
-
-### Do I need the offline model if I have internet?
-
-**No.** If you have internet + a Groq key, the online tier handles everything
-and is faster. The router handles fallback automatically in `both` mode — Groq
-runs first; the local model only kicks in when Groq is unreachable.
-
-### What is offline mode actually *for*, then?
-
-Fair question — installing packages needs the internet anyway (the download
-comes from your distro's mirrors). Offline mode isn't for installing. It's so
-Novato can still **think** — explain errors, teach, diagnose — when the network
-can't be reached:
-
-1. **The mistake-watcher — the killer case.** When is your internet most likely
-   broken? Bad Wi-Fi driver, messed-up network config, DNS problems. That's
-   exactly when you're typing failing commands and need help the most — and
-   exactly when any online AI is guaranteed to be unreachable. The offline LLM
-   can still read the error and explain *"your network service isn't running,
-   try `systemctl start NetworkManager`"*. The moment you need a mentor most is
-   the moment online AI cannot help.
-2. **Error analysis & teaching in general.** Most of Novato isn't installing —
-   it's explaining errors, teaching commands, diagnosing failures. None of that
-   needs the internet, so the offline tier keeps the brain working everywhere:
-   on a train, on a plane, behind a corporate firewall that blocks AI APIs.
-3. **Privacy absolutists.** Some people will never send a single query to any
-   API, period — even with internet available. For them offline isn't a
-   fallback, it's the requirement (`/switch offline`).
-4. **Groq simply being down** — outage, rate limit, region block. The router
-   falls through to the local model automatically, so the experience stays
-   seamless.
-
-### Offline model tiers (which model should I pick?)
-
-The offline LLM comes in four sizes. Bigger = smarter answers, but needs more
-RAM and is a larger one-time download.
-
-| RAM | Auto-selected model | Download size | Good at |
-|---|---|---|---|
-| under 4 GB | TinyLlama 1.1B | ~600 MB | Simple, common requests |
-| 4–8 GB | Phi-3-mini 3.8B | ~2.4 GB | Good reasoning, understands context |
-| 8–16 GB | Mistral-7B | ~4.1 GB | Strong general knowledge, nuanced queries |
-| 16 GB+ | Llama-3.1-8B | ~4.7 GB | Best quality, handles vague/complex requests |
-
-`novato --download-model` auto-picks based on your available RAM. The smarter
-the model, the better it handles unusual or creative descriptions — e.g.
-"something lightweight to read PDFs without all the bloat" vs. just "pdf viewer".
-For most users, **Phi-3-mini** (4–8 GB RAM) is the sweet spot.
-
----
-
-## Safety
-
-Novato has **absolute, non-negotiable** safety rules:
-
-- It **never** auto-runs anything — every command is shown and confirmed.
-- It **never** emits auto-confirm flags (`--noconfirm`, `-y`, `--yes`).
-- It **never** runs system-bricking commands (`dd`, `mkfs`, `fdisk`, fork bombs,
-  `rm -rf /`, wildcard or system-path deletes …) — these are shown for reference
-  only and refused outright.
-- **Deleting a file you named** (`novato "delete report.txt"`) *is* offered, but
-  only ever for **one specific, in-tree file/folder**, behind a loud warning and
-  a default-**No** confirmation. Anything broader (`rm *`, `rm ~`, absolute or
-  system paths, `rm -rf`) stays blocked.
-- It logs every executed command to `~/.novato/history.log`.
-
-See [DOCUMENTATION.md](DOCUMENTATION.md) for the full architecture and rules.
-
----
-
-## Full documentation
-
-- **[USERMANUAL.md](USERMANUAL.md)** — step-by-step guide to every feature.
-- **[DOCUMENTATION.md](DOCUMENTATION.md)** — architecture and technical reference.
-- **[CHANGELOG.md](CHANGELOG.md)** — every fix and change, with the reasoning behind it.
-
-## Contributing
-
-Contributions are very welcome — especially new intents, error rules, and distro
-support. See [DOCUMENTATION.md](DOCUMENTATION.md) for how to add each. Run the
-test suite with:
-
-```bash
-uv run pytest
-```
-
----
-
-## License
-
-**GPLv3** (GNU General Public License v3.0 or later) — see [LICENSE](LICENSE).
-Copyleft keeps Novato and every fork free and open, which fits a tool meant to
-live inside Linux distributions. Every dependency is open source.
+Contributions with reproducible bugs, focused tests, and new distro coverage are
+welcome. Licensed under **GPL-3.0-or-later**; see [LICENSE](LICENSE).

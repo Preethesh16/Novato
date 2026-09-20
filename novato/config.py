@@ -89,7 +89,11 @@ def _coerce(raw: dict[str, Any]) -> Config:
     it one level deeper (``{"extra": {"extra": ...}}``).
     """
     known = {f for f in Config.__dataclass_fields__ if f != "extra"}  # type: ignore[attr-defined]
-    kwargs = {k: v for k, v in raw.items() if k in known}
+    defaults = Config()
+    kwargs = {
+        k: v for k, v in raw.items()
+        if k in known and type(v) is type(getattr(defaults, k))
+    }
     # Genuinely unknown keys (forward-compat from a newer version) go into extra.
     unknown = {k: v for k, v in raw.items() if k not in known and k != "extra"}
     cfg = Config(**kwargs)

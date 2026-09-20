@@ -10,6 +10,20 @@ and the project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Baseline restoration and cross-distro validation (2026-09-20)
+
+- Restored the exact `57a01f4` tree in commit `1aacd90`, retaining Git history.
+- Fixed literal package requests, DNF5 search, dotted Fedora package names,
+  Debian installed-state filtering, missing AUR helpers, and Pamac AUR commands.
+- Hardened typed configuration loading, malformed AUR responses, destructive
+  executable path checks, command quoting, and model download dry runs.
+- Removed the installer's system-pip fallback in favor of isolated installers.
+- Added regression cases and portable storage tests: 427 tests pass on Python
+  3.10/3.12/3.14 and in Arch/Ubuntu/Fedora/openSUSE containers.
+- Added Python/distro CI, reproducible smoke scripts, a rebuilt README, 12 real
+  terminal captures, GIF preview, and a 72-second MP4 walkthrough.
+- See [validation and remaining gaps](docs/TESTING.md) for exact scope.
+
 ### Smart storage workflow
 
 - Builds one measured recommended plan for package/log/download caches, shows
