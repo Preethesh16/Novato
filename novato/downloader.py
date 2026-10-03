@@ -175,7 +175,7 @@ def download_model(
         )
 
     # If the server ignored our Range (200 not 206), restart from scratch.
-    mode = "ab"
+    mode = "ab" if already else "wb"
     if already and status == 200:
         already = 0
         mode = "wb"

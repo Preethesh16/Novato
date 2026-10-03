@@ -111,6 +111,26 @@ def test_resume_from_partial(tmp_path, spec):
     assert path.read_bytes() == b"AAAABBBB"
 
 
+@pytest.mark.parametrize("old", [b"OLD", b"STALE-PARTIAL-MODEL"])
+def test_disabling_resume_replaces_partial_file(tmp_path, spec, old):
+    part = tmp_path / (spec.filename + ".part")
+    part.write_bytes(old)
+    seen = []
+
+    def opener(url, headers):
+        assert "Range" not in headers
+        return _FakeResp(b"FRESH")
+
+    path = downloader.download_model(
+        spec, dest_dir=tmp_path, opener=opener, resume=False,
+        progress=lambda done, total: seen.append((done, total)),
+    )
+    assert path.read_bytes() == b"FRESH"
+    assert seen == [(0, 5), (5, 5)]
+    assert not part.exists()
+    assert os.access(path, os.X_OK)
+
+
 def test_server_ignores_range_restarts(tmp_path, spec):
     part = tmp_path / (spec.filename + ".part")
     part.write_bytes(b"OLD")
