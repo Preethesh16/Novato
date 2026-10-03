@@ -191,3 +191,72 @@ def test_executor_does_not_run_wrapped_destructive_command(monkeypatch):
     result = executor.execute("sudo -u root shred notes.txt")
     assert result.blocked
     assert not result.executed
+
+
+@pytest.mark.parametrize("command,expected", [
+    ("sudo -p -y apt install vlc --yes", "sudo -p -y apt install vlc"),
+    ("env -u --yes apt install vlc -y", "env -u --yes apt install vlc"),
+    ("sudo -p --noconfirm pacman -S vlc --noconfirm", "sudo -p --noconfirm pacman -S vlc"),
+    ("apt install -- --yes", "apt install -- --yes"),
+    ("dnf install -- -y", "dnf install -- -y"),
+    ("echo --yes", "echo --yes"),
+    ("rm -- -y", "rm -- -y"),
+    ("apt -t -y install vlc --yes", "apt -t -y install vlc"),
+    ("dnf --comment --yes install vlc -y", "dnf --comment --yes install vlc"),
+])
+def test_sanitizing_confirmation_flags_preserves_argument_boundaries(command, expected):
+    assert safety.sanitize(command) == expected
+    assert not safety.has_auto_confirm(expected)
+
+
+@pytest.mark.parametrize("command,expected", [
+    ("apt-get -qy install vlc", "apt-get -q install vlc"),
+    ("apt -fy install vlc", "apt -f install vlc"),
+    ("dnf -qy install vlc", "dnf -q install vlc"),
+    ("yum -vy install vlc", "yum -v install vlc"),
+    ("apt-get -qq install vlc", "apt-get -q install vlc"),
+    ("apt-get -q -q install vlc", "apt-get -q install vlc"),
+    ("apt-get --quiet=2 install vlc", "apt-get --quiet=1 install vlc"),
+    ("apt-get -q=2 install vlc", "apt-get --quiet=1 install vlc"),
+    ("zypper -n install vlc", "zypper install vlc"),
+    ("zypper -qn install vlc", "zypper -q install vlc"),
+])
+def test_grouped_and_implicit_confirmation_flags_are_sanitized(command, expected):
+    assert safety.has_auto_confirm(command)
+    assert safety.sanitize(command) == expected
+    assert not safety.has_auto_confirm(expected)
+
+
+@pytest.mark.parametrize("command", [
+    "pacman -Syu", "yay -Syu", "paru -Syu", "apt -tmyrelease install vlc",
+    "dnf -cmyconfig install vlc", "zypper search -n vlc", "sudo -n apt install vlc",
+])
+def test_unrelated_short_flags_and_attached_values_are_preserved(command):
+    assert safety.sanitize(command) == command
+    assert not safety.has_auto_confirm(command)
+
+
+@pytest.mark.parametrize("command", [
+    "pacman -U -", "apt-get -q=0 install vlc", "apt-get -q=1 install vlc",
+    "apt-get --quiet=0001 install vlc", "apt-get --quiet=0 install vlc",
+    "dnf --comment=-y install vlc", "zypper --repo --yes install vlc",
+])
+def test_literal_operands_and_single_quiet_level_are_unchanged(command):
+    assert safety.sanitize(command) == command
+    assert not safety.has_auto_confirm(command)
+
+
+def test_large_quiet_level_does_not_crash_validation():
+    command = "apt-get --quiet=" + "9" * 5000 + " install vlc"
+    assert safety.validate(command).sanitized == "apt-get --quiet=1 install vlc"
+
+
+def test_executor_retains_wrapper_values_when_sanitizing(monkeypatch):
+    from novato import executor
+
+    seen = []
+    monkeypatch.setattr(executor, "_stream", lambda command, sink: seen.append(command) or 0)
+    monkeypatch.setattr(executor._logger, "log_event", lambda *args, **kwargs: None)
+    result = executor.execute("sudo -p -y apt-get -qy install vlc")
+    assert result.succeeded
+    assert seen == ["sudo -p -y apt-get -q install vlc"]
