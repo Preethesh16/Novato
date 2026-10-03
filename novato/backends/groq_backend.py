@@ -20,6 +20,7 @@ Network and API failures never raise into the pipeline — they return an empty 
 from __future__ import annotations
 
 import json
+import math
 import re
 from typing import Optional
 
@@ -166,10 +167,7 @@ class GroqBackend:
         if not obj:
             return TaskIntent(query, source=self.name)
         action = str(obj.get("action", "")).strip().lower()
-        try:
-            confidence = float(obj.get("confidence", 0.0))
-        except (TypeError, ValueError):
-            confidence = 0.0
+        confidence = _parse_confidence(obj.get("confidence"))
         if action not in TASK_ACTIONS or confidence < 0.65:
             return TaskIntent(query, source=self.name)
         return TaskIntent(query, action, min(1.0, confidence), self.name)
@@ -194,7 +192,8 @@ class GroqBackend:
         obj = _parse_json_object(text)
         if not obj or "title" not in obj:
             return None
-        fix = (obj.get("fix") or "").strip()
+        raw_fix = obj.get("fix")
+        fix = raw_fix.strip() if isinstance(raw_fix, str) else ""
         # Enforce safety: never surface a destructive fix even if the model erred.
         if fix and not _safety.validate(fix).allowed:
             fix = ""
@@ -217,7 +216,7 @@ def _parse_package_list(text: str) -> list[str]:
     Tolerant of markdown fences and stray prose: tries a JSON array first, then
     falls back to splitting lines/commas.
     """
-    if not text:
+    if not isinstance(text, str) or not text:
         return []
     # Prefer a JSON array if present.
     match = re.search(r"\[.*?\]", text, re.DOTALL)
@@ -240,6 +239,8 @@ def _parse_package_list(text: str) -> list[str]:
 
 def _parse_json_object(text: str) -> Optional[dict]:
     """Extract the first JSON object from a model response."""
+    if not isinstance(text, str):
+        return None
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
         return None
@@ -248,3 +249,16 @@ def _parse_json_object(text: str) -> Optional[dict]:
         return obj if isinstance(obj, dict) else None
     except json.JSONDecodeError:
         return None
+
+
+def _parse_confidence(value) -> float:
+    """Reject invalid probabilities instead of promoting them to certainty."""
+    if isinstance(value, bool):
+        return 0.0
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+    if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+        return 0.0
+    return confidence

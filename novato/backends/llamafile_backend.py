@@ -23,6 +23,7 @@ from .groq_backend import (
     _INTENT_SYSTEM_PROMPT,
     _TASK_SYSTEM_PROMPT,
     _parse_json_object,
+    _parse_confidence,
     _parse_package_list,
 )
 from ..task_intent import TASK_ACTIONS, TaskIntent
@@ -104,10 +105,7 @@ class LlamafileBackend:
         if not obj:
             return TaskIntent(query, source=self.name)
         action = str(obj.get("action", "")).strip().lower()
-        try:
-            confidence = float(obj.get("confidence", 0.0))
-        except (TypeError, ValueError):
-            confidence = 0.0
+        confidence = _parse_confidence(obj.get("confidence"))
         if action not in TASK_ACTIONS or confidence < 0.65:
             return TaskIntent(query, source=self.name)
         return TaskIntent(query, action, min(1.0, confidence), self.name)
@@ -128,7 +126,8 @@ class LlamafileBackend:
         obj = _parse_json_object(text)
         if not obj or "title" not in obj:
             return None
-        fix = (obj.get("fix") or "").strip()
+        raw_fix = obj.get("fix")
+        fix = raw_fix.strip() if isinstance(raw_fix, str) else ""
         if fix and not _safety.validate(fix).allowed:
             fix = ""
         return _rules.Correction(
