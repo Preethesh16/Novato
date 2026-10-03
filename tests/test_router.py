@@ -227,3 +227,55 @@ def test_build_router_both_with_everything(tmp_path):
     cfg = Config(mode="both", groq_api_key="abc", llamafile_path=str(binpath))
     r = build_router(cfg, check_internet=False, _online_ok=True)
     assert r.chain == ["online", "offline", "basic"]
+
+
+@pytest.fixture(params=["online", "offline"])
+def model_backend(request):
+    def make(content):
+        if request.param == "online":
+            return _groq_with_content(content)
+        return LlamafileBackend("", runner=lambda _: content)
+    return make
+
+
+@pytest.mark.parametrize("confidence", [
+    "NaN", "Infinity", "-Infinity", float("nan"), float("inf"),
+    True, False, 1.1, -1, 0.64, 10 ** 400, None, [], {},
+])
+def test_models_reject_invalid_confidence(model_backend, confidence):
+    import json
+    backend = model_backend(json.dumps({"action": STORAGE_CLEAN, "confidence": confidence}))
+    assert not backend.resolve_task("help with space").found
+
+
+@pytest.mark.parametrize("confidence", [0.65, 0.9, 1.0, "0.95"])
+def test_models_preserve_valid_confidence(model_backend, confidence):
+    import json
+    backend = model_backend(json.dumps({"action": STORAGE_CHECK, "confidence": confidence}))
+    result = backend.resolve_task("check space")
+    assert result.action == STORAGE_CHECK
+    assert result.confidence == float(confidence)
+
+
+@pytest.mark.parametrize("content", [42, True, ["vlc"], {"title": "oops"}])
+def test_models_ignore_nontext_responses(model_backend, content):
+    backend = model_backend(content)
+    assert not backend.resolve_intent("play a video").found
+    assert not backend.resolve_task("help with space").found
+    assert backend.analyze_error(ErrorContext("foo", 1, "boom")) is None
+
+
+@pytest.mark.parametrize("fix", [42, True, ["sudo", "apt", "update"], {"command": "ls"}])
+def test_models_never_turn_nontext_fixes_into_commands(model_backend, fix):
+    import json
+    backend = model_backend(json.dumps({"title": "An explanation", "fix": fix}))
+    correction = backend.analyze_error(ErrorContext("foo", 1, "boom"))
+    assert correction is not None
+    assert correction.fix == ""
+
+
+def test_invalid_ai_confidence_falls_back_to_basic(model_backend):
+    backend = model_backend('{"action":"storage_clean","confidence":"NaN"}')
+    result = Router([backend]).resolve_task("check my disk space")
+    assert result.action == STORAGE_CHECK
+    assert result.source == "basic"
