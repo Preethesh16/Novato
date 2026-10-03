@@ -121,7 +121,7 @@ def _program_index(tokens: list[str]) -> int | None:
     while i < len(tokens):
         wrapper = os.path.basename(tokens[i])
         if wrapper not in _WRAPPER_OPTIONS:
-            return i
+            return None if tokens[i].startswith("-") else i
         simple, valued = _WRAPPER_OPTIONS[wrapper]
         i += 1
         while i < len(tokens) and tokens[i].startswith("-"):

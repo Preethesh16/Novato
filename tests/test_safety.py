@@ -154,6 +154,8 @@ def test_wrapped_package_managers_strip_their_confirm_flags(command):
     "sudo -R / rm etc/passwd",
     "sudo -s shred notes.txt",
     "sudo --unknown shred notes.txt",
+    "sudo FOO=bar -u root shred notes.txt",
+    "env FOO=bar -i shred notes.txt",
     "sudo -u",
     "env -u",
 ])
