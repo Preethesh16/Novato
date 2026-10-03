@@ -121,3 +121,71 @@ def test_sanitize_still_strips_autoconfirm():
 ])
 def test_destructive_paths_and_malformed_commands_are_blocked(command):
     assert not safety.validate(command).allowed
+
+
+@pytest.mark.parametrize("command", [
+    "sudo -u root shred notes.txt",
+    "sudo --user=root wipefs /dev/example",
+    "/usr/bin/sudo -n /usr/bin/shred notes.txt",
+    "doas -u root fdisk /dev/example",
+    "env -i wipefs /dev/example",
+    "env -u DISPLAY sudo -u root shred notes.txt",
+    "sudo -- shred notes.txt",
+])
+def test_wrapped_destructive_commands_are_blocked(command):
+    assert not safety.validate(command).allowed
+
+
+@pytest.mark.parametrize("command", [
+    "sudo -u root apt install vlc --assume-yes",
+    "env -i dnf install vlc --assumeyes",
+    "doas -u root zypper install vlc --non-interactive",
+])
+def test_wrapped_package_managers_strip_their_confirm_flags(command):
+    verdict = safety.validate(command)
+    assert verdict.allowed
+    assert not safety.has_auto_confirm(verdict.sanitized)
+
+
+@pytest.mark.parametrize("command", [
+    "env -S 'shred notes.txt'",
+    "env -C /etc rm passwd",
+    "sudo --chdir=/etc rm passwd",
+    "sudo -R / rm etc/passwd",
+    "sudo -s shred notes.txt",
+    "sudo --unknown shred notes.txt",
+    "sudo -u",
+    "env -u",
+])
+def test_ambiguous_wrapper_commands_are_blocked(command):
+    assert not safety.validate(command).allowed
+
+
+@pytest.mark.parametrize("command,program", [
+    ("sudo -uroot apt install vlc", "apt"),
+    ("sudo --user=root -- apt install vlc", "apt"),
+    ("/usr/bin/env -i FOO=bar /usr/bin/sudo -n apt install vlc", "apt"),
+    ("doas -u root apt install vlc", "apt"),
+    ("env --unset=DISPLAY apt install vlc", "apt"),
+])
+def test_supported_wrapper_options_preserve_normal_commands(command, program):
+    assert safety._program_name(safety._tokens(command)) == program
+    assert safety.validate(command).allowed
+
+
+def test_wrapped_rm_keeps_the_single_target_restriction():
+    assert safety.validate("sudo -u root rm report.txt").allowed
+    assert not safety.validate("sudo -u root rm first.txt second.txt").allowed
+    assert not safety.validate("env -i rm /etc/example").allowed
+
+
+def test_executor_does_not_run_wrapped_destructive_command(monkeypatch):
+    from novato import executor
+
+    def unexpected_execution(*args, **kwargs):
+        pytest.fail("Blocked command reached the executor")
+
+    monkeypatch.setattr(executor, "_stream", unexpected_execution)
+    result = executor.execute("sudo -u root shred notes.txt")
+    assert result.blocked
+    assert not result.executed

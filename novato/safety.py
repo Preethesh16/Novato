@@ -102,15 +102,61 @@ def _tokens(command: str) -> list[str]:
         return command.split()
 
 
-def _program_name(tokens: list[str]) -> str:
-    """Return the effective program name, skipping a leading ``sudo``/env."""
+# Only wrappers whose argument boundaries we understand are unwrapped. Shell
+# modes and unknown options fail closed rather than hiding the real program.
+_WRAPPER_OPTIONS = {
+    "sudo": ({"-n", "-H", "-E", "-b", "--non-interactive", "--set-home",
+              "--preserve-env", "--background"},
+             {"-u", "-g", "-h", "-p", "-C", "-T",
+              "--user", "--group", "--host", "--prompt", "--close-from",
+              "--command-timeout"}),
+    "doas": ({"-n", "-L"}, {"-u"}),
+    "env": ({"-i", "--ignore-environment"}, {"-u", "--unset"}),
+}
+
+
+def _program_index(tokens: list[str]) -> int | None:
+    """Locate the command after supported wrappers, or reject ambiguous syntax."""
     i = 0
-    while i < len(tokens) and tokens[i] in ("sudo", "doas", "env"):
+    while i < len(tokens):
+        wrapper = os.path.basename(tokens[i])
+        if wrapper not in _WRAPPER_OPTIONS:
+            return i
+        simple, valued = _WRAPPER_OPTIONS[wrapper]
         i += 1
-        # Skip env VAR=val assignments.
-        while i < len(tokens) and "=" in tokens[i] and not tokens[i].startswith("-"):
-            i += 1
-    return os.path.basename(tokens[i]) if i < len(tokens) else ""
+        while i < len(tokens) and tokens[i].startswith("-"):
+            option = tokens[i]
+            if option == "--":
+                i += 1
+                break
+            if option in simple:
+                i += 1
+                continue
+            if option in valued:
+                if i + 1 >= len(tokens):
+                    return None
+                i += 2
+                continue
+            # Long --name=value and short -uroot forms consume their own value.
+            if option.startswith("--"):
+                name, sep, value = option.partition("=")
+                if sep and value and name in valued:
+                    i += 1
+                    continue
+            elif len(option) > 2 and option[:2] in valued:
+                i += 1
+                continue
+            return None
+        if wrapper in ("sudo", "env"):
+            while i < len(tokens) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", tokens[i]):
+                i += 1
+    return None
+
+
+def _program_name(tokens: list[str]) -> str:
+    """Return the effective program name after supported sudo/doas/env forms."""
+    i = _program_index(tokens)
+    return os.path.basename(tokens[i]) if i is not None else ""
 
 
 # Shell metacharacters that must never appear in a delete target — a non-shell
@@ -126,11 +172,8 @@ def _safe_rm_target(tokens: list[str]) -> bool:
     paths, the home directory, ``.``/``..``, multiple targets, or the ``-rf``
     force combo (caught earlier by the pattern list).
     """
-    # Drop a leading sudo/doas/env so we look at the real rm invocation.
-    i = 0
-    while i < len(tokens) and tokens[i] in ("sudo", "doas", "env"):
-        i += 1
-    args = tokens[i + 1:] if i < len(tokens) and tokens[i] == "rm" else None
+    i = _program_index(tokens)
+    args = tokens[i + 1:] if i is not None and tokens[i] == "rm" else None
     if args is None:
         return False
 
@@ -163,6 +206,8 @@ def is_destructive(command: str) -> tuple[bool, str]:
             return True, "matches a known dangerous pattern"
     tokens = _tokens(command)
     prog = _program_name(tokens)
+    if not prog:
+        return True, "unsupported or incomplete command wrapper"
     if prog in DESTRUCTIVE_COMMANDS:
         # Deleting one specific, in-tree file/folder by name is permitted (it
         # still needs an explicit confirmation); every other destructive
