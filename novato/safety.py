@@ -218,29 +218,112 @@ def is_destructive(command: str) -> tuple[bool, str]:
     return False, ""
 
 
-def sanitize(command: str) -> str:
-    """Strip auto-confirm flags from a command so a human must confirm.
+# Preserve values even when they happen to look like confirmation flags. In
+# particular, deleting a sudo prompt or an env variable name can move the
+# executable boundary. Package-manager operands after -- are also literal.
+_PM_VALUE_OPTIONS = {
+    "apt": {"-a", "-c", "-o", "-t", "-S", "--host-architecture", "--config-file",
+            "--option", "--target-release", "--default-release", "--snapshot"},
+    "apt-get": {"-a", "-c", "-o", "-t", "-S", "--host-architecture", "--config-file",
+                "--option", "--target-release", "--default-release", "--snapshot"},
+    "dnf": {"-c", "-d", "-e", "-R", "--config", "--debuglevel", "--errorlevel",
+            "--randomwait", "--comment", "--setopt", "--releasever", "--installroot",
+            "--enablerepo", "--disablerepo", "--repo", "--exclude", "-x"},
+    "yum": {"-c", "-d", "-e", "-R", "--config", "--debuglevel", "--errorlevel",
+            "--randomwait", "--setopt", "--releasever", "--installroot",
+            "--enablerepo", "--disablerepo", "--exclude", "-x"},
+    "zypper": {"-c", "-R", "--config", "--root", "--installroot", "--reposd-dir",
+               "--cache-dir", "--pkg-cache-dir", "--raw-cache-dir", "--solv-cache-dir",
+               "--releasever", "-r", "--repo", "--from", "-t", "--type"},
+    "pacman": {"-b", "-r", "--dbpath", "--root", "--config", "--cachedir",
+               "--gpgdir", "--hookdir", "--logfile", "--sysroot", "--arch"},
+}
+_PM_VALUE_OPTIONS["yay"] = _PM_VALUE_OPTIONS["pacman"]
+_PM_VALUE_OPTIONS["paru"] = _PM_VALUE_OPTIONS["pacman"]
 
-    This protects against a backend (or the static map) ever producing an
-    unattended install. Returns the cleaned command string.
-    """
+# Only split known boolean groups; never edit an attached option value such
+# as -tmyrelease or -cmyconfig. Pacman's -y means refresh, not assume-yes.
+_PM_BOOLEAN_SHORT = {
+    "apt": set("bdfhmsuvVyq"), "apt-get": set("bdfhmsuvVyq"),
+    "dnf": set("46bChqvy"), "yum": set("Chqvy"),
+    "zypper": set("qvny"),
+}
+
+
+def _without_auto_confirm(tokens: list[str]) -> list[str]:
+    program = _program_index(tokens)
+    if program is None:
+        return tokens
+    manager = os.path.basename(tokens[program])
+    if manager not in _PM_CONFIRM_FLAGS:
+        return tokens
+    cleaned = tokens[:program + 1]
+    flags = set(_PM_CONFIRM_FLAGS[manager])
+    valued = _PM_VALUE_OPTIONS[manager]
+    is_apt = manager in ("apt", "apt-get")
+    quiet = 0
+    subcommand_seen = False
+    i = program + 1
+    while i < len(tokens):
+        token = tokens[i]
+        i += 1
+        if token == "--":
+            cleaned.extend(tokens[i - 1:])
+            break
+        if token in valued:
+            cleaned.append(token)
+            if i < len(tokens):
+                cleaned.append(tokens[i])
+                i += 1
+            continue
+        if token in flags:
+            continue
+        if is_apt:
+            # APT quiet level 2 implies yes even without a -y flag.
+            level = re.fullmatch(r"(?:--quiet=|-q=?)([0-9]+)", token)
+            if level:
+                digits = level.group(1).lstrip("0")
+                quiet = 1 if digits else 0
+                cleaned.append(token if digits in ("", "1") else "--quiet=1")
+                continue
+            if token == "--quiet":
+                if quiet < 1:
+                    cleaned.append(token)
+                    quiet += 1
+                continue
+        if (len(token) > 1 and token.startswith("-") and not token.startswith("--")
+                and set(token[1:]) <= _PM_BOOLEAN_SHORT.get(manager, set())):
+            kept = []
+            for flag in token[1:]:
+                if flag == "y":
+                    continue
+                if manager == "zypper" and flag == "n" and not subcommand_seen:
+                    continue
+                if is_apt and flag == "q":
+                    if quiet >= 1:
+                        continue
+                    quiet += 1
+                kept.append(flag)
+            if kept:
+                cleaned.append("-" + "".join(kept))
+            continue
+        cleaned.append(token)
+        if not token.startswith("-"):
+            subcommand_seen = True
+    return cleaned
+
+
+def sanitize(command: str) -> str:
+    """Remove supported package-manager confirmation flags without moving arguments."""
     tokens = _tokens(command)
-    prog = _program_name(tokens)
-    flags = set(AUTO_CONFIRM_FLAGS)
-    flags.update(_PM_CONFIRM_FLAGS.get(prog, ()))
-    cleaned = [t for t in tokens if t not in flags]
-    if cleaned == tokens:
-        return command  # nothing stripped -> preserve the original text verbatim
-    # Re-quote so a token with spaces ("blah blah.txt") survives the round-trip.
-    return shlex.join(cleaned)
+    cleaned = _without_auto_confirm(tokens)
+    return command if cleaned == tokens else shlex.join(cleaned)
 
 
 def has_auto_confirm(command: str) -> bool:
-    """True if the command contains any auto-confirm flag."""
-    tokens = set(_tokens(command))
-    return bool(tokens & set(AUTO_CONFIRM_FLAGS)) or any(
-        f in tokens for fs in _PM_CONFIRM_FLAGS.values() for f in fs
-    )
+    """Whether supported package-manager flags suppress confirmation prompts."""
+    tokens = _tokens(command)
+    return _without_auto_confirm(tokens) != tokens
 
 
 def validate(command: str) -> Verdict:
