@@ -174,3 +174,117 @@ def test_opener_exception_raises(tmp_path, spec):
 ])
 def test_human_size(n, expected):
     assert human_size(n) == expected
+
+
+@pytest.mark.parametrize("body,declared", [(b"SHORT", "10"), (b"TOO-LONG", "3")])
+def test_incomplete_or_oversized_response_is_not_promoted(tmp_path, spec, body, declared):
+    response = _FakeResp(body, headers={"Content-Length": declared})
+    with pytest.raises(DownloadError):
+        downloader.download_model(spec, dest_dir=tmp_path, opener=lambda *_: response)
+    assert not (tmp_path / spec.filename).exists()
+
+
+@pytest.mark.parametrize("content_range", [
+    "bytes 0-3/8", "bytes 5-8/9", "bytes 4-9/8", "garbage", "bytes 4-7/*",
+])
+def test_invalid_resume_range_preserves_partial(tmp_path, spec, content_range):
+    part = tmp_path / (spec.filename + ".part")
+    part.write_bytes(b"AAAA")
+    response = _FakeResp(b"BBBB", status=206, headers={"Content-Range": content_range})
+    with pytest.raises(DownloadError):
+        downloader.download_model(spec, dest_dir=tmp_path, opener=lambda *_: response)
+    assert part.read_bytes() == b"AAAA"
+    assert not (tmp_path / spec.filename).exists()
+
+
+def test_stream_failure_remains_resumable_and_closes_response(tmp_path, spec):
+    class BrokenResponse(_FakeResp):
+        closed = False
+
+        def iter_content(self, chunk_size=1):
+            yield b"AAAA"
+            raise RuntimeError("stream disconnected")
+
+        def close(self):
+            self.closed = True
+
+    response = BrokenResponse(b"", headers={"Content-Length": "8"})
+    with pytest.raises(DownloadError, match="stream disconnected"):
+        downloader.download_model(spec, dest_dir=tmp_path, opener=lambda *_: response)
+    assert (tmp_path / (spec.filename + ".part")).read_bytes() == b"AAAA"
+    assert not (tmp_path / spec.filename).exists()
+    assert response.closed
+
+
+@pytest.mark.parametrize("status", [200, 404])
+def test_http_response_is_closed(tmp_path, spec, status):
+    response = _FakeResp(b"DATA", status=status)
+    closed = []
+    response.close = lambda: closed.append(True)
+    if status == 200:
+        downloader.download_model(spec, dest_dir=tmp_path, opener=lambda *_: response)
+    else:
+        with pytest.raises(DownloadError):
+            downloader.download_model(spec, dest_dir=tmp_path, opener=lambda *_: response)
+    assert closed == [True]
+
+
+@pytest.mark.parametrize("headers", [
+    {"Content-Length": "-1"},
+    {"Content-Length": "invalid"},
+    {"Content-Encoding": "gzip", "Content-Length": "4"},
+])
+def test_invalid_metadata_does_not_overwrite_partial(tmp_path, spec, headers):
+    part = tmp_path / (spec.filename + ".part")
+    part.write_bytes(b"OLD")
+    response = _FakeResp(b"DATA", headers=headers)
+    with pytest.raises(DownloadError):
+        downloader.download_model(spec, dest_dir=tmp_path, opener=lambda *_: response)
+    assert part.read_bytes() == b"OLD"
+
+
+def test_truncated_download_can_resume_on_next_attempt(tmp_path, spec):
+    first = _FakeResp(b"AAAA", headers={"Content-Length": "8"})
+    with pytest.raises(DownloadError):
+        downloader.download_model(spec, dest_dir=tmp_path, opener=lambda *_: first)
+
+    def resume(url, headers):
+        assert headers["Range"] == "bytes=4-"
+        assert headers["Accept-Encoding"] == "identity"
+        return _FakeResp(b"BBBB", status=206, headers={"Content-Range": "bytes 4-7/8"})
+
+    final = downloader.download_model(spec, dest_dir=tmp_path, opener=resume)
+    assert final.read_bytes() == b"AAAABBBB"
+    assert os.access(final, os.X_OK)
+
+
+def test_chunked_response_without_size_can_complete(tmp_path, spec):
+    response = _FakeResp(b"DATA")
+    response.headers = {}
+    final = downloader.download_model(spec, dest_dir=tmp_path, opener=lambda *_: response)
+    assert final.read_bytes() == b"DATA"
+
+
+def test_empty_response_is_not_a_model(tmp_path, spec):
+    with pytest.raises(DownloadError):
+        downloader.download_model(spec, dest_dir=tmp_path, opener=lambda *_: _FakeResp(b""))
+    assert not (tmp_path / spec.filename).exists()
+
+
+def test_interrupt_closes_response_and_preserves_prefix(tmp_path, spec):
+    class InterruptedResponse(_FakeResp):
+        closed = False
+
+        def iter_content(self, chunk_size=1):
+            yield b"AAAA"
+            raise KeyboardInterrupt
+
+        def close(self):
+            self.closed = True
+
+    response = InterruptedResponse(b"", headers={"Content-Length": "8"})
+    with pytest.raises(KeyboardInterrupt):
+        downloader.download_model(spec, dest_dir=tmp_path, opener=lambda *_: response)
+    assert response.closed
+    assert (tmp_path / (spec.filename + ".part")).read_bytes() == b"AAAA"
+    assert not (tmp_path / spec.filename).exists()
