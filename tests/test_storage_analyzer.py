@@ -486,3 +486,96 @@ def test_duplicates_inside_repository_in_cache_are_not_cleanup_actions(tmp_path,
     inventory = analyze_home(str(tmp_path), [], duplicate_min_bytes=1)
     assert inventory.duplicates
     assert not inventory.review_candidates
+
+
+def test_zero_largest_limit_disables_file_ranking(tmp_path):
+    (tmp_path / 'file').write_text('content')
+    inventory = analyze_home(str(tmp_path), [], largest_limit=0)
+    assert inventory.files_scanned == 1
+    assert not inventory.largest_files
+
+
+def test_zero_file_budget_reads_no_files(tmp_path):
+    (tmp_path / 'file').write_text('content')
+    inventory = analyze_home(str(tmp_path), [], max_files=0)
+    assert inventory.files_scanned == 0
+    assert inventory.incomplete
+
+
+def test_scan_deadline_applies_to_trees_without_regular_files(tmp_path, monkeypatch):
+    for name in ('first', 'second', 'third'):
+        (tmp_path / name).mkdir()
+    clock = [0.0]
+    real_walk = storage_analyzer.os.walk
+    def slow_walk(*args, **kwargs):
+        for entry in real_walk(*args, **kwargs):
+            clock[0] += 2
+            yield entry
+    monkeypatch.setattr(storage_analyzer.os, 'walk', slow_walk)
+    monkeypatch.setattr(storage_analyzer.time, 'monotonic', lambda: clock[0])
+    inventory = analyze_home(str(tmp_path), [], max_seconds=1)
+    assert inventory.incomplete
+    assert inventory.dirs_scanned <= 1
+
+
+def test_deadline_is_checked_before_256_files(tmp_path, monkeypatch):
+    for name in ('first', 'second', 'third'):
+        (tmp_path / name).write_text('content')
+    clock = [0.0]
+    real_stat = storage_analyzer.os.stat
+    def slow_stat(path, *args, **kwargs):
+        result = real_stat(path, *args, **kwargs)
+        if str(path).endswith(('first', 'second', 'third')):
+            clock[0] += 2
+        return result
+    monkeypatch.setattr(storage_analyzer.os, 'stat', slow_stat)
+    monkeypatch.setattr(storage_analyzer.time, 'monotonic', lambda: clock[0])
+    inventory = analyze_home(str(tmp_path), [], max_seconds=1)
+    assert inventory.incomplete
+    assert inventory.files_scanned <= 1
+
+
+def test_duplicate_hashing_shares_the_scan_deadline(tmp_path, monkeypatch):
+    for name in ('first', 'second'):
+        (tmp_path / name).write_bytes(b'x' * (3 * 1024 * 1024))
+    clock = [0.0]
+    real_open = open
+    reads = []
+    class SlowReader:
+        def __init__(self, path, mode):
+            self.handle = real_open(path, mode)
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            self.handle.close()
+        def read(self, size):
+            reads.append(size)
+            clock[0] += 2
+            return self.handle.read(size)
+    monkeypatch.setattr(storage_analyzer, 'open', SlowReader, raising=False)
+    monkeypatch.setattr(storage_analyzer.time, 'monotonic', lambda: clock[0])
+    inventory = analyze_home(str(tmp_path), [], max_seconds=1, duplicate_min_bytes=1)
+    assert inventory.incomplete
+    assert not inventory.duplicates
+    assert len(reads) <= 1
+
+
+
+@pytest.mark.parametrize('options', [
+    {'max_files': -1}, {'largest_limit': -1}, {'largest_limit': 1.5},
+    {'duplicate_min_bytes': -1}, {'max_seconds': -1},
+    {'max_seconds': float('nan')}, {'max_seconds': float('inf')},
+])
+def test_invalid_scan_budgets_are_rejected(tmp_path, options):
+    with pytest.raises(ValueError):
+        analyze_home(str(tmp_path), [], **options)
+
+
+@pytest.mark.parametrize('options', [{'max_seconds': 0}, {'max_files': 0}])
+def test_zero_budget_does_not_enter_the_filesystem_walk(tmp_path, monkeypatch, options):
+    def unexpected_walk(*args, **kwargs):
+        pytest.fail('zero budget entered filesystem walk')
+    monkeypatch.setattr(storage_analyzer.os, 'walk', unexpected_walk)
+    inventory = analyze_home(str(tmp_path), [], **options)
+    assert inventory.incomplete
+    assert inventory.files_scanned == inventory.dirs_scanned == 0

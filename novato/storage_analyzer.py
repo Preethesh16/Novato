@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import heapq
+import math
 import os
 import shlex
 import shutil
@@ -205,7 +206,17 @@ def analyze_home(
     duplicate_min_bytes: int = 50 * 1024**2,
     largest_limit: int = 15,
 ) -> Inventory:
-    """Walk home locally and produce bounded, evidence-backed findings."""
+    """Walk and hash within a shared budget, returning partial results on expiry.
+
+    The deadline is checked between filesystem operations; it cannot interrupt
+    an individual blocking OS call. A zero file/time budget performs no scan.
+    """
+    for name, value in (("max_files", max_files), ("largest_limit", largest_limit),
+                        ("duplicate_min_bytes", duplicate_min_bytes)):
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError(f"{name} must be a non-negative integer")
+    if not math.isfinite(max_seconds) or max_seconds < 0:
+        raise ValueError("max_seconds must be finite and non-negative")
     inventory = Inventory()
     for row in large_dirs:
         kind, reason, confidence = classify_path(row.path, home)
@@ -213,13 +224,17 @@ def analyze_home(
             row.path, int(_size_to_bytes(row.size)), kind, reason, confidence,
         ))
 
+    if max_files == 0 or max_seconds == 0:
+        inventory.incomplete = True
+        return inventory
+
     try:
         home_device = os.stat(home, follow_symlinks=False).st_dev
     except OSError:
         inventory.incomplete = True
         return inventory
 
-    started = time.monotonic()
+    deadline = time.monotonic() + max_seconds
     trash_root = os.path.realpath(os.path.join(home, ".local", "share", "Trash"))
     largest: list[tuple[int, str, float]] = []
     duplicate_candidates: dict[int, list[tuple[str, tuple[int, int]]]] = {}
@@ -236,6 +251,9 @@ def analyze_home(
         inventory.incomplete = True
 
     for root, dirs, files in os.walk(home, topdown=True, followlinks=False, onerror=walk_error):
+        if inventory.files_scanned >= max_files or time.monotonic() >= deadline:
+            inventory.incomplete = True
+            break
         inventory.dirs_scanned += 1
         # A Git worktree uses a .git file, while a normal checkout uses a
         # directory. Neither may be swallowed by a parent cache cleanup.
@@ -248,6 +266,10 @@ def analyze_home(
                 protected_subtrees.add(os.path.realpath(protected_path))
         kept_dirs = []
         for dirname in dirs:
+            if time.monotonic() >= deadline:
+                inventory.incomplete = True
+                stop = True
+                break
             full = os.path.join(root, dirname)
             real_full = os.path.realpath(full)
             if real_full == trash_root or real_full.startswith(trash_root + os.sep):
@@ -260,8 +282,14 @@ def analyze_home(
             if stat.S_ISDIR(info.st_mode) and info.st_dev == home_device:
                 kept_dirs.append(dirname)
         dirs[:] = kept_dirs
+        if stop:
+            break
 
         for filename in files:
+            if inventory.files_scanned >= max_files or time.monotonic() >= deadline:
+                inventory.incomplete = True
+                stop = True
+                break
             path = os.path.join(root, filename)
             try:
                 info = os.stat(path, follow_symlinks=False)
@@ -272,10 +300,11 @@ def analyze_home(
                 continue
             inventory.files_scanned += 1
             item = (info.st_size, path, info.st_mtime)
-            if len(largest) < largest_limit:
-                heapq.heappush(largest, item)
-            elif item[0] > largest[0][0]:
-                heapq.heapreplace(largest, item)
+            if largest_limit:
+                if len(largest) < largest_limit:
+                    heapq.heappush(largest, item)
+                elif item[0] > largest[0][0]:
+                    heapq.heapreplace(largest, item)
             if info.st_size >= duplicate_min_bytes:
                 group = duplicate_candidates.setdefault(info.st_size, [])
                 if len(group) < 32:
@@ -301,10 +330,7 @@ def analyze_home(
                     count + 1, blocks, link_count, max(modified, info.st_mtime),
                 )
 
-            if inventory.files_scanned >= max_files or (
-                inventory.files_scanned % 256 == 0
-                and time.monotonic() - started >= max_seconds
-            ):
+            if inventory.files_scanned >= max_files or time.monotonic() >= deadline:
                 inventory.incomplete = True
                 dirs[:] = []
                 stop = True
@@ -324,7 +350,9 @@ def analyze_home(
             path, size, kind, reason, confidence, age_days,
         ))
 
-    inventory.duplicates = _verified_duplicates(duplicate_candidates)
+    inventory.duplicates = _verified_duplicates(duplicate_candidates, deadline=deadline)
+    if time.monotonic() >= deadline:
+        inventory.incomplete = True
     generated_stats = _reclaimable_link_stats(generated_links)
     sdk_stats = _reclaimable_link_stats(sdk_links)
     existing = {finding.path: finding for finding in inventory.findings}
@@ -679,7 +707,7 @@ def _android_tool(home: str, name: str) -> str:
 
 def _verified_duplicates(
     candidates: dict[int, list[tuple[str, tuple[int, int]]]],
-    *, max_files_to_hash: int = 160,
+    *, max_files_to_hash: int = 160, deadline: float | None = None,
 ) -> list[DuplicateGroup]:
     """Hash only same-sized large files; size alone is never called a duplicate."""
     groups: list[DuplicateGroup] = []
@@ -692,9 +720,9 @@ def _verified_duplicates(
             continue
         by_digest: dict[str, list[str]] = {}
         for path in unique_inodes.values():
-            if hashed >= max_files_to_hash:
+            if hashed >= max_files_to_hash or (deadline is not None and time.monotonic() >= deadline):
                 break
-            digest = _sha256(path)
+            digest = _sha256(path, deadline=deadline)
             hashed += 1
             if digest:
                 by_digest.setdefault(digest, []).append(path)
@@ -703,18 +731,24 @@ def _verified_duplicates(
                 groups.append(DuplicateGroup(
                     tuple(paths), size, size * (len(paths) - 1),
                 ))
-        if hashed >= max_files_to_hash:
+        if hashed >= max_files_to_hash or (deadline is not None and time.monotonic() >= deadline):
             break
     groups.sort(key=lambda group: group.reclaimable_bytes, reverse=True)
     return groups[:8]
 
 
-def _sha256(path: str) -> str:
+def _sha256(path: str, *, deadline: float | None = None) -> str:
+    if deadline is not None and time.monotonic() >= deadline:
+        return ""
     try:
         digest = hashlib.sha256()
         with open(path, "rb") as handle:
-            while chunk := handle.read(1024 * 1024):
+            while deadline is None or time.monotonic() < deadline:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    return digest.hexdigest()
                 digest.update(chunk)
-        return digest.hexdigest()
+        # Never report a partial digest as proof that two files are identical.
+        return ""
     except OSError:
         return ""
