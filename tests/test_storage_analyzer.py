@@ -350,3 +350,139 @@ def test_analyzer_discovers_sdk_packages_and_emulators(tmp_path):
     assert "system-images;android-35;google_apis;x86_64" in sdk.command
     assert "avdmanager" in emulator.command
     assert "Pixel" in emulator.command
+
+
+@pytest.mark.parametrize('relative', [
+    '.ssh/build', '.gnupg/.cache/pip', '.config/app/node_modules',
+    '.password-store/target', '.mozilla/.npm/_cacache', 'Projects/site/.git/build',
+])
+def test_protected_locations_override_generated_names(tmp_path, relative):
+    path = tmp_path / relative
+    path.mkdir(parents=True)
+    assert classify_path(str(path), str(tmp_path))[0] == PROTECTED
+    assert not storage_analyzer._actionable_generated(str(path), str(tmp_path))
+
+
+@pytest.mark.parametrize('marker_is_file', [True, False])
+def test_repository_named_like_build_output_is_protected(tmp_path, marker_is_file):
+    root = tmp_path / 'build'
+    root.mkdir()
+    marker = root / '.git'
+    if marker_is_file:
+        marker.write_text('gitdir: /example/worktree')
+    else:
+        marker.mkdir()
+    assert classify_path(str(root), str(tmp_path))[0] == PROTECTED
+    assert not storage_analyzer._actionable_generated(str(root), str(tmp_path))
+
+
+def test_duplicate_detection_does_not_offer_protected_configuration_for_trash(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage_analyzer.shutil, 'which', lambda tool: '/usr/bin/gio' if tool == 'gio' else None)
+    credentials = tmp_path / '.ssh'
+    credentials.mkdir()
+    for name in ('key-one', 'key-two'):
+        (credentials / name).write_bytes(b'identical test data')
+    inventory = analyze_home(str(tmp_path), [], duplicate_min_bytes=1)
+    assert inventory.duplicates
+    assert not inventory.review_candidates
+
+
+def test_generated_parent_containing_repository_is_not_offered_for_trash(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage_analyzer.shutil, 'which', lambda tool: '/usr/bin/gio' if tool == 'gio' else None)
+    parent = tmp_path / '.cache' / 'pip'
+    repository = parent / 'unique-source'
+    (repository / '.git').mkdir(parents=True)
+    _allocate(parent / 'cache.bin')
+    inventory = analyze_home(str(tmp_path), [], duplicate_min_bytes=100 * 1024**2)
+    assert all(item.path != str(parent) for item in inventory.review_candidates)
+
+
+def test_incomplete_scan_does_not_offer_uninspected_generated_tree_for_trash(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage_analyzer.shutil, 'which', lambda tool: '/usr/bin/gio' if tool == 'gio' else None)
+    root = tmp_path / '.cache' / 'pip'
+    root.mkdir(parents=True)
+    _allocate(root / 'first.bin')
+    inventory = analyze_home(str(tmp_path), [], max_files=1)
+    assert inventory.incomplete
+    assert all(not item.command and not item.recommended for item in inventory.review_candidates)
+
+
+def test_repository_can_still_offer_its_generated_dependency_subfolder(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage_analyzer.shutil, 'which', lambda tool: '/usr/bin/gio' if tool == 'gio' else None)
+    project = tmp_path / 'Projects' / 'site'
+    (project / '.git').mkdir(parents=True)
+    modules = project / 'node_modules'
+    modules.mkdir()
+    _allocate(modules / 'dependency.bin')
+    inventory = analyze_home(str(tmp_path), [], duplicate_min_bytes=100 * 1024**2)
+    assert any(item.path == str(modules) and item.command for item in inventory.review_candidates)
+    assert all(item.path != str(project) for item in inventory.review_candidates)
+
+
+def test_generated_parent_containing_settings_is_protected(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage_analyzer.shutil, 'which', lambda tool: '/usr/bin/gio' if tool == 'gio' else None)
+    root = tmp_path / '.cache' / 'pip'
+    settings = root / '.ssh'
+    settings.mkdir(parents=True)
+    _allocate(root / 'download.bin')
+    (settings / 'test-key').write_text('placeholder only')
+    inventory = analyze_home(str(tmp_path), [], duplicate_min_bytes=100 * 1024**2)
+    assert all(item.path != str(root) for item in inventory.review_candidates)
+    assert next(item for item in inventory.findings if item.path == str(root)).kind == PROTECTED
+
+
+def test_permission_error_marks_scan_incomplete_and_removes_cleanup_commands(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage_analyzer.shutil, 'which', lambda tool: '/usr/bin/gio' if tool == 'gio' else None)
+    root = tmp_path / '.cache' / 'pip'
+    root.mkdir(parents=True)
+    _allocate(root / 'download.bin')
+    real_walk = storage_analyzer.os.walk
+    def partial_walk(*args, **kwargs):
+        yield from real_walk(*args, **kwargs)
+        kwargs['onerror'](PermissionError('test directory unreadable'))
+    monkeypatch.setattr(storage_analyzer.os, 'walk', partial_walk)
+    inventory = analyze_home(str(tmp_path), [], duplicate_min_bytes=100 * 1024**2)
+    assert inventory.incomplete
+    assert inventory.review_candidates
+    assert all(not item.command and not item.recommended for item in inventory.review_candidates)
+
+
+def test_old_personal_archive_remains_available_for_explicit_review(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage_analyzer.shutil, 'which', lambda tool: '/usr/bin/gio' if tool == 'gio' else None)
+    archive = tmp_path / 'Documents' / 'old.zip'
+    archive.parent.mkdir()
+    archive.write_bytes(b'example archive')
+    old = archive.stat().st_mtime - 100 * 86400
+    os.utime(archive, (old, old))
+    inventory = analyze_home(str(tmp_path), [], duplicate_min_bytes=100 * 1024**2)
+    assert any(item.path == str(archive) and not item.recommended for item in inventory.review_candidates)
+
+
+
+def test_settings_symlink_keeps_lexical_protection(tmp_path):
+    cache = tmp_path / '.cache' / 'pip'
+    (cache / 'build').mkdir(parents=True)
+    (tmp_path / '.ssh').symlink_to(cache, target_is_directory=True)
+    assert classify_path(str(tmp_path / '.ssh' / 'build'), str(tmp_path))[0] == PROTECTED
+
+
+def test_cache_target_of_settings_symlink_is_not_offered_for_trash(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage_analyzer.shutil, 'which', lambda tool: '/usr/bin/gio' if tool == 'gio' else None)
+    cache = tmp_path / '.cache' / 'pip'
+    cache.mkdir(parents=True)
+    _allocate(cache / 'data.bin')
+    (tmp_path / '.ssh').symlink_to(cache, target_is_directory=True)
+    inventory = analyze_home(str(tmp_path), [], duplicate_min_bytes=100 * 1024**2)
+    assert all(item.path != str(cache) for item in inventory.review_candidates)
+
+
+
+def test_duplicates_inside_repository_in_cache_are_not_cleanup_actions(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage_analyzer.shutil, 'which', lambda tool: '/usr/bin/gio' if tool == 'gio' else None)
+    repo = tmp_path / '.cache' / 'pip' / 'source'
+    (repo / '.git').mkdir(parents=True)
+    for name in ('first.py', 'second.py'):
+        (repo / name).write_bytes(b'identical source with distinct roles')
+    inventory = analyze_home(str(tmp_path), [], duplicate_min_bytes=1)
+    assert inventory.duplicates
+    assert not inventory.review_candidates

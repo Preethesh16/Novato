@@ -16,7 +16,7 @@ import shlex
 import shutil
 import stat
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Iterable
 
@@ -128,6 +128,18 @@ def classify_path(path: str, home: str, *, is_file: bool = False,
         parts = [part.lower() for part in Path(path).parts]
     part_set = set(parts)
     name = parts[-1] if parts else ""
+    try:
+        lexical = Path(os.path.abspath(path)).relative_to(os.path.abspath(home))
+    except ValueError:
+        lexical = Path(path)
+    protected_parts = part_set | {part.lower() for part in lexical.parts}
+
+    # Security/configuration and repository markers take precedence over names
+    # such as build, node_modules or .cache that merely suggest generated data.
+    if protected_parts & _SETTINGS_ROOTS:
+        return PROTECTED, "Application or security configuration; do not treat as junk.", 0.96
+    if ".git" in protected_parts or os.path.lexists(os.path.join(path, ".git")):
+        return PROTECTED, "Source repository; project history and work may be unique.", 0.97
 
     if _matching_cache_root(parts):
         return (
@@ -158,10 +170,6 @@ def classify_path(path: str, home: str, *, is_file: bool = False,
         )
     if name in ("dist", "out") and not is_file:
         return REBUILDABLE, "Likely generated build output; review before removal.", 0.72
-    if part_set & _SETTINGS_ROOTS:
-        return PROTECTED, "Application or security configuration; do not treat as junk.", 0.96
-    if ".git" in part_set or os.path.isdir(os.path.join(path, ".git")):
-        return PROTECTED, "Source repository; project history and work may be unique.", 0.97
     if parts and parts[0] == "downloads":
         old = age_days is not None and age_days >= 90
         reason = (
@@ -208,6 +216,7 @@ def analyze_home(
     try:
         home_device = os.stat(home, follow_symlinks=False).st_dev
     except OSError:
+        inventory.incomplete = True
         return inventory
 
     started = time.monotonic()
@@ -221,9 +230,22 @@ def analyze_home(
         tuple[str, str, str], dict[tuple[int, int], tuple[int, int, int, float]]
     ] = {}
     stop = False
+    protected_subtrees: set[str] = set()
 
-    for root, dirs, files in os.walk(home, topdown=True, followlinks=False):
+    def walk_error(_error: OSError) -> None:
+        inventory.incomplete = True
+
+    for root, dirs, files in os.walk(home, topdown=True, followlinks=False, onerror=walk_error):
         inventory.dirs_scanned += 1
+        # A Git worktree uses a .git file, while a normal checkout uses a
+        # directory. Neither may be swallowed by a parent cache cleanup.
+        if any(name.lower() == ".git" for name in [*dirs, *files]):
+            protected_subtrees.add(os.path.realpath(root))
+        for name in [*dirs, *files]:
+            if name.lower() in _SETTINGS_ROOTS:
+                protected_path = os.path.join(root, name)
+                protected_subtrees.add(os.path.abspath(protected_path))
+                protected_subtrees.add(os.path.realpath(protected_path))
         kept_dirs = []
         for dirname in dirs:
             full = os.path.join(root, dirname)
@@ -233,6 +255,7 @@ def analyze_home(
             try:
                 info = os.stat(full, follow_symlinks=False)
             except OSError:
+                inventory.incomplete = True
                 continue
             if stat.S_ISDIR(info.st_mode) and info.st_dev == home_device:
                 kept_dirs.append(dirname)
@@ -243,6 +266,7 @@ def analyze_home(
             try:
                 info = os.stat(path, follow_symlinks=False)
             except OSError:
+                inventory.incomplete = True
                 continue
             if not stat.S_ISREG(info.st_mode) or info.st_dev != home_device:
                 continue
@@ -312,10 +336,18 @@ def analyze_home(
         age_days = max(0, int((now - modified) / 86400)) if modified else None
         finding = Finding(path, size, kind, reason, confidence, age_days)
         existing[path] = finding
+    for path, finding in list(existing.items()):
+        if _contains_protected_subtree(path, protected_subtrees):
+            existing[path] = replace(
+                finding, kind=PROTECTED,
+                reason="Contains protected configuration or repository data; do not clean up as a generated folder.",
+                confidence=0.99,
+            )
     inventory.findings = list(existing.values())
     inventory.findings.sort(key=lambda finding: finding.size_bytes, reverse=True)
     inventory.review_candidates = _build_review_candidates(
         inventory, home, sdk_stats=sdk_stats, now=now,
+        protected_subtrees=protected_subtrees,
     )
     return inventory
 
@@ -434,6 +466,7 @@ def _build_review_candidates(
     *,
     sdk_stats: dict[tuple[str, str, str], tuple[int, float]],
     now: float,
+    protected_subtrees: set[str],
 ) -> list[ReviewCandidate]:
     candidates: list[ReviewCandidate] = []
     gio = shutil.which("gio")
@@ -508,6 +541,10 @@ def _build_review_candidates(
         )
         keeper = ranked[0]
         for path in ranked[1:]:
+            # Equal bytes do not make credentials, configuration or protected
+            # personal files interchangeable at their different paths.
+            if classify_path(path, home, is_file=True)[0] == PROTECTED:
+                continue
             command = shlex.join([gio, "trash", path]) if gio else ""
             candidates.append(ReviewCandidate(
                 os.path.basename(path), path, group.each_bytes, "exact duplicate",
@@ -518,9 +555,31 @@ def _build_review_candidates(
     # Larger and older candidates first; stable de-duplication by real path.
     unique: dict[str, ReviewCandidate] = {}
     for candidate in candidates:
+        is_file = os.path.isfile(candidate.path)
+        real_path = os.path.realpath(candidate.path)
+        protected_file = is_file and any(
+            real_path.startswith(protected + os.sep) for protected in protected_subtrees
+        )
+        if (classify_path(candidate.path, home, is_file=is_file)[0] == PROTECTED
+                or protected_file
+                or _contains_protected_subtree(candidate.path, protected_subtrees)):
+            continue
+        if inventory.incomplete:
+            candidate = replace(
+                candidate, command="", action="review", recommended=False,
+                reason=candidate.reason + " The scan was incomplete; inspect the whole path before cleanup.",
+            )
         unique.setdefault(os.path.realpath(candidate.path), candidate)
     candidates = _remove_overlapping_candidates(list(unique.values()))
     return sorted(candidates, key=_candidate_priority, reverse=True)[:40]
+
+
+def _contains_protected_subtree(path: str, protected_subtrees: set[str]) -> bool:
+    real_path = os.path.realpath(path)
+    return any(
+        protected == real_path or protected.startswith(real_path + os.sep)
+        for protected in protected_subtrees
+    )
 
 
 def _remove_overlapping_candidates(
@@ -584,6 +643,8 @@ def _is_download_cache_root(path: str, home: str) -> bool:
 def _actionable_generated(path: str, home: str) -> bool:
     """Allow only conventional generated/cache roots strictly inside home."""
     if os.path.islink(path) or not os.path.isdir(path):
+        return False
+    if classify_path(path, home)[0] == PROTECTED:
         return False
     real_home = os.path.realpath(home)
     real_path = os.path.realpath(path)
