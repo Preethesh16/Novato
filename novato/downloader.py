@@ -20,6 +20,7 @@ touching the network. Nothing here ever runs the model — it only fetches it.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -161,68 +162,87 @@ def download_model(
         return final  # Already done.
 
     already = part.stat().st_size if (resume and part.exists()) else 0
-    headers = {"Range": f"bytes={already}-"} if already else {}
+    headers = {"Accept-Encoding": "identity"}
+    if already:
+        headers["Range"] = f"bytes={already}-"
 
     try:
         resp = opener(spec.url, headers)
     except Exception as exc:  # network / DNS / TLS
         raise DownloadError(f"Could not start download: {exc}") from exc
 
-    status = getattr(resp, "status_code", 200)
-    if status not in (200, 206):
-        raise DownloadError(
-            f"Download failed with HTTP {status} for {spec.url}"
-        )
-
-    # If the server ignored our Range (200 not 206), restart from scratch.
-    mode = "ab" if already else "wb"
-    if already and status == 200:
-        already = 0
-        mode = "wb"
-
-    total = _content_total(resp, already)
-
     try:
+        status = getattr(resp, "status_code", 200)
+        if status not in (200, 206):
+            raise DownloadError(f"Download failed with HTTP {status} for {spec.url}")
+
+        # A full response replaces the old prefix when the server ignores Range.
+        mode = "ab" if already and status == 206 else "wb"
+        if status == 200:
+            already = 0
+        total, expected_body = _response_sizes(resp, already, status)
+        received = 0
         with open(part, mode) as fh:
-            downloaded = already
             if progress:
-                progress(downloaded, total)
+                progress(already, total)
             for chunk in _iter_chunks(resp):
                 if not chunk:
                     continue
+                if expected_body is not None and received + len(chunk) > expected_body:
+                    raise DownloadError("Response exceeded its advertised byte length.")
                 fh.write(chunk)
-                downloaded += len(chunk)
+                received += len(chunk)
                 if progress:
-                    progress(downloaded, total)
-    except OSError as exc:
-        raise DownloadError(f"Error writing download: {exc}") from exc
+                    progress(already + received, total)
 
-    # Atomically move into place and make it executable.
-    try:
+        downloaded = already + received
+        if not downloaded or (total is not None and downloaded != total):
+            raise DownloadError("Download is incomplete; partial data was kept for resuming.")
+        if expected_body is not None and received != expected_body:
+            raise DownloadError("Response ended before its advertised byte length.")
+
+        # Only a complete response can become the executable model.
+        os.chmod(part, 0o755)
         os.replace(part, final)
-        os.chmod(final, 0o755)
-    except OSError as exc:
-        raise DownloadError(f"Could not finalise download: {exc}") from exc
-    return final
+        return final
+    except DownloadError:
+        raise
+    except Exception as exc:
+        raise DownloadError(f"Could not complete download: {exc}") from exc
+    finally:
+        close = getattr(resp, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass  # Cleanup must not hide the original transfer failure.
 
 
-def _content_total(resp, already: int) -> Optional[int]:
-    """Compute the total file size from response headers, if known."""
-    headers = getattr(resp, "headers", {}) or {}
-    # Content-Range: bytes 100-999/1000  ->  total is after the slash.
-    cr = headers.get("Content-Range") or headers.get("content-range")
-    if cr and "/" in cr:
+def _response_sizes(resp, already: int, status: int) -> tuple[Optional[int], Optional[int]]:
+    """Validate resume boundaries and return (complete size, response size)."""
+    headers = {key.lower(): value for key, value in (getattr(resp, "headers", {}) or {}).items()}
+    if headers.get("content-encoding", "identity").lower() not in ("", "identity"):
+        raise DownloadError("Encoded model responses cannot be safely resumed.")
+    length = headers.get("content-length")
+    if length is not None:
         try:
-            return int(cr.rsplit("/", 1)[1])
-        except (ValueError, IndexError):
-            pass
-    cl = headers.get("Content-Length") or headers.get("content-length")
-    if cl is not None:
-        try:
-            return int(cl) + already
-        except (TypeError, ValueError):
-            pass
-    return None
+            length = int(length)
+        except (TypeError, ValueError) as exc:
+            raise DownloadError("Invalid Content-Length header.") from exc
+        if length < 0:
+            raise DownloadError("Invalid Content-Length header.")
+    if status == 206:
+        match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", headers.get("content-range", ""))
+        if not match:
+            raise DownloadError("Missing or invalid Content-Range for a partial response.")
+        start, end, total = map(int, match.groups())
+        if start != already or not start <= end < total:
+            raise DownloadError("Response range does not match the partial download.")
+        expected = end - start + 1
+        if length is not None and length != expected:
+            raise DownloadError("Content-Length conflicts with Content-Range.")
+        return total, expected
+    return length, length
 
 
 def _iter_chunks(resp):
